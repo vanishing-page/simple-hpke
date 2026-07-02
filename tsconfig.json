@@ -2,9 +2,9 @@
   "compilerOptions": {
     "listFiles": true,
     "module": "ES2022",
-    "target": "ES2022",
+    "target": "ES2024",
     "moduleResolution": "Bundler",
-    "lib": ["ES2022", "DOM", "WebWorker"],
+    "lib": ["ES2024", "DOM", "WebWorker"],
     "types": ["vite/client"],
     "allowJs": false,
     "skipLibCheck": true,

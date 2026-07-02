@@ -25,9 +25,10 @@
   "scripts": {
     "lint": "eslint \"./**/*.{ts,js}\"",
     "test": "npm run build && esbuild ./test/index.ts --bundle | tapout",
-    "build-cjs": "esbuild src/*.ts --format=cjs --keep-names --tsconfig=tsconfig.build.json --outdir=./dist --out-extension:.js=.cjs --sourcemap",
-    "build-cjs:min": "esbuild src/*.ts --format=cjs --minify --keep-names --tsconfig=tsconfig.build.json --outdir=./dist --out-extension:.js=.min.cjs --sourcemap",
-    "build-esm": "esbuild src/*.ts --format=esm --metafile=dist/meta.json --keep-names --tsconfig=tsconfig.build.json --outdir=./dist --sourcemap && tsc --emitDeclarationOnly --project tsconfig.build.json --outDir dist",
+    "test:node": "esbuild ./test/node.ts --bundle --platform=node --format=esm --external:tweetnacl --external:@noble/hashes --outfile=./test/node.mjs && node ./test/node.mjs",
+    "build-cjs": "esbuild src/*.ts --bundle --format=cjs --keep-names --tsconfig=tsconfig.build.json --outdir=./dist --out-extension:.js=.cjs --sourcemap",
+    "build-cjs:min": "esbuild src/*.ts --bundle --format=cjs --minify --keep-names --tsconfig=tsconfig.build.json --outdir=./dist --out-extension:.js=.min.cjs --sourcemap",
+    "build-esm": "esbuild src/*.ts --bundle --format=esm --metafile=dist/meta.json --keep-names --tsconfig=tsconfig.build.json --outdir=./dist --sourcemap && tsc --emitDeclarationOnly --project tsconfig.build.json --outDir dist",
     "build-esm:min": "esbuild ./src/*.ts --format=esm --keep-names --bundle --tsconfig=tsconfig.build.json --minify --out-extension:.js=.min.js --outdir=./dist --sourcemap",
     "build-example": "mkdir -p ./public && rm -rf ./public/* && VITE_DEBUG_MODE=staging vite --mode staging --base=\"/repo-name\" build",
     "build-docs": "typedoc ./src/index.ts",
@@ -42,6 +43,7 @@
   "devDependencies": {
     "@preact/preset-vite": "^2.10.5",
     "@substrate-system/debug": "^0.9.64",
+    "@substrate-system/keys": "^0.2.41",
     "@substrate-system/tapout": "^0.0.38",
     "@substrate-system/tapzero": "^0.10.15",
     "auto-changelog": "^2.4.0",

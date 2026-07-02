@@ -2,6 +2,7 @@ node_modules
 bundle.js
 .DS_Store
 test/*.js
+test/node.mjs
 dist
 .env
 public

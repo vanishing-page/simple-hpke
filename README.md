@@ -1,4 +1,4 @@
-# ECIES
+# HPKE
 [![tests](https://img.shields.io/github/actions/workflow/status/nichoth/ecies/nodejs.yml?style=flat-square)](https://github.com/nichoth/ecies/actions/workflows/nodejs.yml)
 [![types](https://img.shields.io/npm/types/@substrate-system/icons?style=flat-square)](README.md)
 [![module](https://img.shields.io/badge/module-ESM%2FCJS-blue?style=flat-square)](README.md)
@@ -10,7 +10,7 @@
 [![license](https://img.shields.io/badge/license-Big_Time-blue?style=flat-square)](LICENSE)
 
 
-Elliptic Curve Integrated Encryption Scheme with the webcrypto API.
+Wrap AES keys using HPKE (RFC 9180) and the WebCrypto API.
 
 
 <details><summary><h2>Contents</h2></summary>
@@ -25,9 +25,16 @@ npm i -S @substrate-system/ecies
 
 ## Example
 
+Wrap an AES key to your keypair and unwrap it:
+
 ```ts
-import { ecies } from '@substrate-system/ecies'
+import { seal, open } from '@substrate-system/ecies'
+
+const { wrapped, key } = await seal(keypair)
+const recovered = await open(keypair, wrapped)
 ```
+
+See [docs/README.md](./docs/README.md) for the full API and rationale.
 
 ## Modules
 
