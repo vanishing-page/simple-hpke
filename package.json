@@ -40,6 +40,7 @@
     "postversion": "git push --follow-tags && npm publish",
     "prepublishOnly": "npm run build"
   },
+  "dependencies": {},
   "devDependencies": {
     "@preact/preset-vite": "^2.10.5",
     "@substrate-system/debug": "^0.9.64",

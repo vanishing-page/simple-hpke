@@ -182,5 +182,5 @@ application boundaries (RFC 9180 §7.2.1).
 `@substrate-system/keys` (via `EccKeys`) can create keypairs you can pass
 here. The two share a keypair, but they're **not wire-compatible**: the
 `EccKeys` `wrap`/`unwrap` methods use a different internal protocol than this
-package's standardized HPKE. This package uses a vendored panva `hpke`
-implementation (MIT license).
+package's standardized HPKE. This package implements the RFC 9180 key schedule
+first-party on WebCrypto, with zero runtime dependencies.
