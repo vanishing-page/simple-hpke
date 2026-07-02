@@ -5,7 +5,6 @@
     "target": "ES2024",
     "moduleResolution": "Bundler",
     "lib": ["ES2024", "DOM", "WebWorker"],
-    "types": ["vite/client"],
     "allowJs": false,
     "skipLibCheck": true,
     "outDir": "dist",
