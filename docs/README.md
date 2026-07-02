@@ -126,8 +126,8 @@ const recovered = await open(keypair, wrapped)
 ### With domain separation (info)
 
 ```ts
-// keypair and aesKey from examples above
-const { wrapped } = await seal(keypair, aesKey, {
+// keypair and myKey from examples above
+const { wrapped } = await seal(keypair, myKey, {
     info:'my-app:v1'
 })
 
