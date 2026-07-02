@@ -128,7 +128,7 @@ test('AC1.5: non-extractable key throws', async t => {
     let threw = false
     try {
         await seal(kp, nonExtractable)
-    } catch (e) {
+    } catch (_e) {
         threw = true
     }
 
@@ -141,7 +141,7 @@ test('AC1.6: invalid keysize throws', async t => {
     let threw = false
     try {
         await seal(kp, null, { keysize:100 as any })
-    } catch (e) {
+    } catch (_e) {
         threw = true
     }
 
