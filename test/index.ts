@@ -1,5 +1,6 @@
 import { test } from '@substrate-system/tapzero'
 import { seal, open } from '../src/index.js'
+import { EccKeys } from '@substrate-system/keys/ecc'
 
 const subtle = globalThis.crypto.subtle
 
@@ -175,8 +176,6 @@ test('AC3.4: sealing the same key twice yields different envelopes',
 
 // ===== TASK 1: @substrate-system/keys EccKeys integration tests =====
 
-import { EccKeys } from '@substrate-system/keys/ecc'
-
 async function eccKeypair ():Promise<CryptoKeyPair> {
     const keys = await EccKeys.create()
     return {
@@ -266,7 +265,7 @@ test('AC3.3: mismatched info causes rejection, matching succeeds',
         const kp = await genKeypair()
 
         // Seal with 'context-a'
-        const { wrapped } = await seal(kp, null, { info:'context-a' })
+        const { wrapped, key } = await seal(kp, null, { info:'context-a' })
 
         // Attempt open with mismatched 'context-b'
         let threw = false
@@ -280,10 +279,8 @@ test('AC3.3: mismatched info causes rejection, matching succeeds',
 
         // Verify matching info succeeds
         const recovered = await open(kp, wrapped, { info:'context-a' })
-        const recoveredRaw = await raw(recovered)
-        t.ok(
-            recoveredRaw.byteLength > 0,
-            'matching info round-trips successfully'
+        t.ok(bytesEqual(await raw(key), await raw(recovered)),
+            'matching info round-trips to identical bytes'
         )
     }
 )
