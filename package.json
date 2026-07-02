@@ -1,8 +1,8 @@
 {
-  "private": true,
-  "type": "module",
+  "name": "@substrate-system/simple-hpke",
   "version": "0.0.0",
-  "main": "dist/index.js",
+  "description": "Hybrid Public Key Encryption",
+  "type": "module",
   "files": [
     "./dist/*"
   ],
@@ -64,6 +64,26 @@
     "typescript-eslint": "^8.62.0",
     "vite": "^8.1.0"
   },
-  "author": "nichoth <nichoth@nichoth.com> (https://nichoth.com)",
-  "license": "SEE LICENSE IN LICENSE"
+  "main": "dist/index.js",
+  "types": "./dist/index.d.ts",
+  "directories": {
+    "doc": "docs",
+    "example": "example",
+    "test": "test"
+  },
+  "keywords": [
+    "HPKE",
+    "crypto",
+    "browser"
+  ],
+  "homepage": "https://github.com/nichoth/simple-hpke#readme",
+  "bugs": {
+    "url": "https://github.com/nichoth/simple-hpke/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nichoth/simple-hpke.git"
+  },
+  "license": "SEE LICENSE IN LICENSE",
+  "author": "nichoth <nichoth@nichoth.com> (https://nichoth.com)"
 }
