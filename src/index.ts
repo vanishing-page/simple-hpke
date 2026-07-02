@@ -56,18 +56,13 @@ async function exportAesKeyBytes (key:CryptoKey):Promise<Uint8Array> {
             'aesKey must be extractable: its raw bytes are what get sealed'
         )
     }
-    const exported = await subtle.exportKey('raw', key)
-    const view = new Uint8Array(exported as ArrayBufferLike)
-    const result = new Uint8Array(view.length)
-    result.set(view)
-    return result
+    return new Uint8Array(await subtle.exportKey('raw', key))
 }
 
 async function importAesKey (raw:Uint8Array):Promise<CryptoKey> {
     return subtle.importKey(
         'raw',
-        // @ts-expect-error: WebCrypto types incorrectly include SharedArrayBuffer
-        raw,
+        raw as BufferSource,
         { name:'AES-GCM' },
         true,
         ['encrypt', 'decrypt']
@@ -144,7 +139,7 @@ export async function open (
     const ciphertext = wrapped.slice(ENC_LENGTH)
 
     const keyBytes = await suite.Open(
-        keypair.privateKey,
+        keypair,
         enc,
         ciphertext,
         { info }

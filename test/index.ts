@@ -126,13 +126,21 @@ test('AC1.5: non-extractable key throws', async t => {
     )
 
     let threw = false
+    let errorMessage = ''
     try {
         await seal(kp, nonExtractable)
-    } catch (_e) {
+    } catch (e) {
         threw = true
+        if (e instanceof Error) {
+            errorMessage = e.message
+        }
     }
 
     t.ok(threw, 'non-extractable key throws during seal')
+    t.ok(
+        /extractable/.test(errorMessage),
+        'error message mentions extractable guard'
+    )
 })
 
 test('AC1.6: invalid keysize throws', async t => {
