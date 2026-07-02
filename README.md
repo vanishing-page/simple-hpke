@@ -1,6 +1,6 @@
 # HPKE
 [![tests](https://img.shields.io/github/actions/workflow/status/nichoth/simple-hpke/nodejs.yml?style=flat-square)](https://github.com/nichoth/simple-hpke/actions/workflows/nodejs.yml)
-[![types](https://img.shields.io/npm/types/@nichoth/simple-hpke?style=flat-square)](README.md)
+[![types](https://img.shields.io/npm/types/@substrate-system/simple-hpke?style=flat-square)](README.md)
 [![module](https://img.shields.io/badge/module-ESM%2FCJS-blue?style=flat-square)](README.md)
 [![semantic versioning](https://img.shields.io/badge/semver-2.0.0-blue?logo=semver&style=flat-square)](https://semver.org/)
 [![Common Changelog](https://nichoth.github.io/badge/common-changelog.svg)](./CHANGELOG.md)
