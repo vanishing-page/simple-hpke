@@ -1,75 +1,184 @@
-# ECIES
+# seal / open: AES-GCM Key Wrapping with HPKE
 
-To encrypt an AES key to your **own** ECC key pair (self-encryption),
-you use the **ECIES** (Elliptic Curve Integrated Encryption Scheme) protocol,
-where you act as both the sender and the recipient.
+Wrap a symmetric AES key to your own X25519 keypair using RFC 9180 HPKE.
+This is a self-encryption pattern: you seal a key now, unseal it later with
+the same keypair (e.g., re-sealing a key to a new device). The API works in
+modern browsers and Node.js via WebCrypto.
 
-The process effectively creates a secure "envelope" using an **ephemeral** key
-pair generated specifically for this operation.
+## API
 
-**Should use `X25519` algorithm for ECC encryption**
+### seal
 
-## 1. Generate an Ephemeral Key Pair
+```ts
+seal(
+    keypair:CryptoKeyPair,
+    aesKey?:CryptoKey|null,
+    opts?:HpkeOpts
+):Promise<{ wrapped:Uint8Array; key:CryptoKey }>
+```
 
-Create a temporary ECC key pair (`ephemeral_private`, `ephemeral_public`) using
-the **same curve** (e.g., `secp256r1`, `secp256k1`) as your static key pair.
+Wrap an AES key to your public key.
 
-* *Why?* Using a fresh ephemeral key for every encryption ensures
-  **semantic security**; encrypting the same AES key twice will produce
-  different ciphertexts.
+**Parameters:**
+- `keypair`: An X25519 `CryptoKeyPair` (private key may be non-extractable).
+- `aesKey`: Optional AES-GCM key to seal. Omit to generate a fresh
+  extractable key of `opts.keysize` bits. If supplied, it MUST be extractable
+  (its raw bytes are sealed).
+- `opts`: `HpkeOpts` — optional `keysize` and `info`.
 
-## 2. Derive the Shared Secret
+**Returns:** An object with `wrapped` (the envelope bytes) and `key` (the
+AES-GCM `CryptoKey` — same as input if provided, or newly generated).
 
-Perform an **ECDH** (Elliptic Curve Diffie-Hellman) operation between:
+### open
 
-*  Your **ephemeral private key**.
-*  Your **static public key** (from your permanent key pair).
-*  Result: A shared secret point on the curve.
+```ts
+open(
+    keypair:CryptoKeyPair,
+    wrapped:Uint8Array,
+    opts?:{ info? }
+):Promise<CryptoKey>
+```
 
-## 3. Derive the AES Wrapping Key
+Recover an AES key that was wrapped with `seal`, using your private key.
 
-Pass the shared secret through a **Key Derivation Function (KDF)**
-(e.g., `HKDF-SHA256` or `Concatenation KDF`) to generate a symmetric AES key
-(e.g., 256-bit).
+**Parameters:**
+- `keypair`: The same X25519 `CryptoKeyPair` used to seal.
+- `wrapped`: The envelope returned by `seal` (`enc ‖ ciphertext`).
+- `opts`: Optional `info` — must match the value passed to `seal`.
 
-* This derived key is mathematically distinct from your original AES key but is
-  used solely to encrypt it.
+**Returns:** The recovered AES-GCM `CryptoKey` (extractable).
 
-## 4. Encrypt and Package
-* __Encrypt__: Use the derived AES key to encrypt your target AES key
-  (using a mode like **AES-GCM** or **AES-CBC**).
-* __Package__: The final output must include:
-    1. The **ephemeral public key** (unencrypted).
-    2. The **encrypted AES key** (ciphertext).
-    3. (Optional) The **IV/Nonce** and **Authentication Tag** if using an
-       authenticated mode like GCM.
+### HpkeOpts
 
-## Decryption Process
+```ts
+type HpkeOpts = {
+    keysize?:128|192|256
+    info?:Uint8Array|string
+}
+```
 
-To retrieve the AES key later:
+- `keysize`: Size in bits of the generated AES key. Defaults to 256. Ignored
+  when an `aesKey` is supplied to `seal`.
+- `info`: Bound into the HPKE key schedule for domain separation. Defaults to
+  empty. Must match between `seal` and `open`.
 
-1. Extract the **ephemeral public key** from the package.
-2. Perform **ECDH** using your **static private key** and the
-   **ephemeral public key**. (Mathematically, `static_private * ephemeral_public`
-   equals `ephemeral_private * static_public`).
-3. Run the result through the same **KDF** to re-derive the AES wrapping key.
-4. Decrypt the ciphertext to recover your original AES key.
+### Wire Format
 
+The wrapped output is 80 bytes (for a 256-bit key) or 64 bytes (for a 128-bit
+key):
 
+```
+enc(32 bytes) ‖ ciphertext
+```
 
------------------------
+- `enc`: The 32-byte X25519 encapsulated secret (ephemeral public key).
+- `ciphertext`: The AES-256-GCM ciphertext (key bytes + 16-byte auth tag).
 
+No salt or IV is stored; HPKE derives the AEAD nonce internally from the key
+schedule.
 
-The standard move is ephemeral-static ECDH (ECIES-shaped): generate a throwaway
-keypair, ECDH its private against your static public, derive the AES-GCM key,
-ship the ephemeral public key alongside the ciphertext, discard the ephemeral
-private. That gives you a fresh key per message and doesn't pin everything to
-one deterministic secret. The two-party check at the bottom (secrets agree: true)
-is that same primitive with the ephemeral side kept around.
+## Usage
 
-One caution on the deterministic path: a fixed AES-GCM key means you must
-never reuse an (key, IV) pair, and since the key never rotates, a random
-96-bit IV per message is doing all the nonce-uniqueness work. Fine at
-low-to-moderate message volume; if you're encrypting a lot under that one
-static key, prefer a counter-based nonce or rotate via HKDF info/salt
-per message.
+### Generate a new key
+
+```ts
+import { seal, open } from '@substrate-system/ecies'
+import { EccKeys } from '@substrate-system/keys'
+
+// Create a fresh keypair
+const keys = await EccKeys.create()
+const keypair = {
+    publicKey:keys.publicExchangeKey,
+    privateKey:keys.privateExchangeKey
+}
+
+// Seal a fresh key (no aesKey parameter)
+const { wrapped, key } = await seal(keypair)
+
+// Later: unseal it with the same keypair
+const recovered = await open(keypair, wrapped)
+
+// Both key and recovered are usable AES-GCM CryptoKeys
+```
+
+### Bring your own AES key
+
+```ts
+import { seal, open } from '@substrate-system/ecies'
+
+// Suppose you have an existing AES-GCM key
+const myKey = await crypto.subtle.importKey(
+    'raw',
+    new Uint8Array(32),
+    { name:'AES-GCM' },
+    true,  // Must be extractable
+    ['encrypt', 'decrypt']
+)
+
+// Seal it with a specific keysize (ignored when aesKey is supplied)
+const { wrapped, key } = await seal(keypair, myKey, { keysize:256 })
+
+// Recover the same key later
+const recovered = await open(keypair, wrapped)
+```
+
+### With domain separation (info)
+
+```ts
+const { wrapped } = await seal(keypair, aesKey, {
+    info:'my-app:v1'
+})
+
+// info must match on unseal
+const key = await open(keypair, wrapped, { info:'my-app:v1' })
+```
+
+## Why HPKE
+
+### Ephemeral-static ECDH
+
+HPKE's KEM uses a fresh ephemeral key pair per seal against your static
+public key. Each seal produces a different envelope for the same input,
+giving semantic security (RFC 9180 §7.1.3). The encapsulated secret travels
+unencrypted; only the key bytes are sealed.
+
+### HKDF Extract-then-Expand
+
+The raw ECDH output is fragile. Running it through HKDF-SHA256 (Extract →
+Expand) stretches the shared secret, adds entropy, and derives distinct
+keys for different purposes without single-output reuse attacks (RFC 5869
+§2; RFC 9180 §7.1.3).
+
+### Standardized over bespoke ECIES
+
+RFC 9180 HPKE defines a single, interoperable cipher suite with rigorous
+security review. Older ECIES implementations vary widely (Diffie-Hellman
+variant, KDF choice, encoding). A standard key schedule and domain separation
+via `info` prevent misuse.
+
+### Non-extractable private keys
+
+HPKE needs only `deriveBits` on the private key. Your X25519 private key
+never leaves the WebCrypto boundary and can stay non-extractable (W3C
+WebCrypto / WICG Secure Curves). This hardens key isolation.
+
+### Nonce safety
+
+The AEAD nonce is derived from the key schedule, not stored or transmitted.
+Each seal uses a fresh ephemeral, so there's no AES-GCM nonce-reuse window
+(RFC 9180 §7.2.2).
+
+### info binding
+
+Passing `info` to both `seal` and `open` binds context (e.g., an application
+name or version) into the key schedule without changing the wire format. This
+provides domain separation and prevents key material from leaking across
+application boundaries (RFC 9180 §7.2.1).
+
+## Relationship to @substrate-system/keys
+
+`@substrate-system/keys` (via `EccKeys`) can create keypairs you can pass
+here. The two share a keypair, but they're **not wire-compatible**: the
+`EccKeys` `wrap`/`unwrap` methods use a different internal protocol than this
+package's standardized HPKE. This package uses a vendored panva `hpke`
+implementation (MIT license).
