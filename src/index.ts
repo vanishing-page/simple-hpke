@@ -14,7 +14,7 @@ import {
  */
 export type HpkeOpts = {
     // Size of the GENERATED AES key. Ignored when an `aesKey` is supplied.
-    keysize?:128|192|256
+    keysize?:128|256
     // HPKE `info`: bound into the key schedule; must match on seal + open.
     info?:Uint8Array|string
 }
@@ -37,9 +37,9 @@ const ENC_LENGTH = suite.KEM.Nenc
 const AEAD_TAG_LENGTH = 16
 
 function validateKeysize (keysize:number):void {
-    if (keysize !== 128 && keysize !== 192 && keysize !== 256) {
+    if (keysize !== 128 && keysize !== 256) {
         throw new Error(
-            `invalid keysize: ${keysize} (expected 128, 192, or 256)`
+            `invalid keysize: ${keysize} (expected 128 or 256)`
         )
     }
 }
@@ -84,7 +84,7 @@ function concat (a:Uint8Array, b:Uint8Array):Uint8Array {
  * @param aesKey Optional AES-GCM key to seal. Omit to generate a fresh
  *   extractable key of `opts.keysize` bits. If supplied it MUST be extractable
  *   (its raw bytes are sealed).
- * @param opts `keysize` (128/192/256, default 256; ignored when `aesKey` is
+ * @param opts `keysize` (128/256, default 256; ignored when `aesKey` is
  *   supplied) and `info` (bound into the HPKE key schedule; default empty).
  * @returns The envelope bytes and a usable AES-GCM `CryptoKey`.
  */

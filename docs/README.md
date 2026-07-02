@@ -53,7 +53,7 @@ Recover an AES key that was wrapped with `seal`, using your private key.
 
 ```ts
 type HpkeOpts = {
-    keysize?:128|192|256
+    keysize?:128|256
     info?:Uint8Array|string
 }
 ```
