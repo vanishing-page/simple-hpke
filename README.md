@@ -24,6 +24,7 @@ Hybrid Public Key Encryption
     + [Encrypt / Decrypt](#encrypt--decrypt)
       - [`encrypt`](#encrypt)
       - [Encrypt to a string](#encrypt-to-a-string)
+      - [`decrypt`](#decrypt)
 - [Modules](#modules)
   * [ESM](#esm)
   * [Common JS](#common-js)
