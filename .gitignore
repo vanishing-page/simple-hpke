@@ -7,3 +7,4 @@ dist
 .env
 public
 CLAUDE.md
+.claude

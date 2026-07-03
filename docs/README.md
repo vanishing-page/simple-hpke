@@ -117,8 +117,8 @@ import { EccKeys } from '@substrate-system/keys/ecc'
 // Create a fresh keypair
 const keys = await EccKeys.create()
 const keypair = {
-    publicKey:keys.publicExchangeKey,
-    privateKey:keys.privateExchangeKey
+    publicKey: keys.publicExchangeKey,
+    privateKey: keys.privateExchangeKey
 }
 
 // Seal a fresh key (no aesKey parameter)
@@ -139,13 +139,13 @@ import { seal, open } from '@substrate-system/ecies'
 const myKey = await crypto.subtle.importKey(
     'raw',
     new Uint8Array(32),
-    { name:'AES-GCM' },
+    { name: 'AES-GCM' },
     true,  // Must be extractable
     ['encrypt', 'decrypt']
 )
 
 // Seal it with a specific keysize (ignored when aesKey is supplied)
-const { wrapped, key } = await seal(keypair, myKey, { keysize:256 })
+const { wrapped, key } = await seal(keypair, myKey, { keysize: 256 })
 
 // Recover the same key later
 const recovered = await open(keypair, wrapped)
@@ -175,10 +175,10 @@ be a `CryptoKey`, 32 raw bytes, or an encoded string.
 import { encrypt } from '@substrate-system/ecies'
 
 // The recipient shares their X25519 public key as a base64url string
-const recipient = { publicKey:'aGVsbG8...', encoding:'base64url' }
+const recipient = { publicKey: 'aGVsbG8...', encoding: 'base64url' }
 
 // encoding defaults to base64url, so this is equivalent:
-// const recipient = { publicKey:'aGVsbG8...' }
+// const recipient = { publicKey: 'aGVsbG8...' }
 
 const envelope = await encrypt(recipient, 'a message for them')
 
@@ -190,11 +190,11 @@ const envelope = await encrypt(recipient, 'a message for them')
 ```ts
 // keypair and myKey from examples above
 const { wrapped } = await seal(keypair, myKey, {
-    info:'my-app:v1'
+    info: 'my-app:v1'
 })
 
 // info must match on unseal
-const key = await open(keypair, wrapped, { info:'my-app:v1' })
+const key = await open(keypair, wrapped, { info: 'my-app:v1' })
 ```
 
 ## Why HPKE

@@ -56,7 +56,7 @@ import { seal, open } from '@substrate-system/simple-hpke'
 // An X25519 keypair. The private key can be non-extractable.
 // HPKE needs only `deriveBits`.
 const keypair = await crypto.subtle.generateKey(
-    { name:'X25519' },
+    { name: 'X25519' },
     false,  // extractable
     ['deriveBits']
 )
@@ -66,7 +66,7 @@ const { wrapped, key } = await seal(keypair)
 
 // Or wrap an existing AES key. The supplied key must be extractable.
 const aesKey = await crypto.subtle.generateKey(
-    { name:'AES-GCM', length:256 },
+    { name: 'AES-GCM', length: 256 },
     true,  // extractable
     ['encrypt', 'decrypt']
 )
@@ -89,7 +89,7 @@ the message.
 import { seal, open } from '@substrate-system/simple-hpke'
 
 const recipient = await crypto.subtle.generateKey(
-    { name:'X25519' },
+    { name: 'X25519' },
     false,  // extractable
     ['deriveBits']
 )
@@ -98,7 +98,7 @@ const recipient = await crypto.subtle.generateKey(
 const { wrapped, key } = await seal(recipient)
 const iv = crypto.getRandomValues(new Uint8Array(12))
 const ciphertext = await crypto.subtle.encrypt(
-    { name:'AES-GCM', iv },
+    { name: 'AES-GCM', iv },
     key,
     new TextEncoder().encode('attack at dawn')
 )
@@ -120,7 +120,7 @@ const ciphertext2 = message.subarray(80 + 12)
 // Recover the key, then decrypt the message.
 const recovered = await open(recipient, wrapped2)
 const plaintext = await crypto.subtle.decrypt(
-    { name:'AES-GCM', iv:iv2 },
+    { name: 'AES-GCM', iv: iv2 },
     recovered,
     ciphertext2
 )
@@ -151,7 +151,7 @@ import {
 
 // need a public key for the recipient
 const recipient = await crypto.subtle.generateKey(
-    { name:'X25519' },
+    { name: 'X25519' },
     false,
     ['deriveBits']
 )
@@ -169,7 +169,7 @@ const bytes = await decrypt(recipient, encryptedMessage)
 // use an existing AES key
 //
 const existingKey = await crypto.subtle.generateKey(
-    { name:'AES-GCM', length:256 },
+    { name: 'AES-GCM', length: 256 },
     true,  // extractable
     ['encrypt', 'decrypt']
 )
@@ -216,7 +216,7 @@ import { fromString } from 'uint8arrays'
 
 // recipient is any RecipientKey; keypair holds the matching private key
 const encryptedString = await encrypt.asString(recipient, 'message for them', null, {
-    encoding:'base64url'
+    encoding: 'base64url'
 })
 
 // Decode it back to bytes before decrypting.
