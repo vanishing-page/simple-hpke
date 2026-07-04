@@ -39,12 +39,12 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "uint8arrays": "^5.1.1"
+    "uint8arrays": "^6.1.1"
   },
   "devDependencies": {
     "@substrate-system/debug": "^0.9.64",
     "@substrate-system/keys": "^0.2.41",
-    "@substrate-system/tapout": "^0.0.38",
+    "@substrate-system/tapout": "^0.0.40",
     "@substrate-system/tapzero": "^0.10.15",
     "auto-changelog": "^2.4.0",
     "esbuild": "^0.28.1",
