@@ -172,84 +172,6 @@ export const open = Object.assign(openBytes, {
 const WRAPPED_LEN_PREFIX = 2
 
 /**
- * Seal a fresh (or supplied) AES key to `recipient`, then AES-GCM encrypt a
- * message under it. The wrapped key, IV, and ciphertext are concatenated
- * into a single self-describing envelope.
- *
- * Wire format: `wrappedLen(2, big-endian) ‖ wrapped ‖ iv(12) ‖ ciphertext`.
- * The length prefix lets `decrypt` slice the segments apart for either
- * 128- or 256-bit wrapped keys.
- *
- * @param recipient The recipient's X25519 public key, as a `CryptoKey`,
- *   `CryptoKeyPair` (its `.publicKey` is used), 32 raw bytes (`Uint8Array`),
- *   or `{ publicKey:string, encoding? }` (encoding defaults to `base64url`).
- * @param message Plaintext to encrypt. A `string` is UTF-8 encoded.
- * @param aesKey Optional key, as either an AES-GCM `CryptoKey` or its raw
- *   bytes (`Uint8Array`, 16 or 32 bytes). Omit to generate a fresh key of
- *   `opts.keysize` bits. A supplied `CryptoKey` MUST be extractable.
- * @param opts `keysize` (128/256, default 256; ignored when `aesKey` is
- *   supplied) and `info` (bound into the HPKE key schedule).
- * @returns The concatenated envelope bytes.
- *
- * `encrypt.asString(...)` returns the same envelope as an encoded string.
- */
-async function encryptBytes (
-    recipient:RecipientKey,
-    message:Uint8Array|string,
-    aesKey?:CryptoKey|Uint8Array|null,
-    opts?:{
-        keysize?:128|256
-        info?:Uint8Array|string
-    }
-):Promise<Uint8Array> {
-    const plaintext = typeof message === 'string' ?
-        new TextEncoder().encode(message) :
-        message
-
-    const { wrapped, key } = await seal(recipient, aesKey, opts)
-    const iv = globalThis.crypto.getRandomValues(new Uint8Array(NN))
-    const ct = new Uint8Array(await subtle.encrypt(
-        { name: 'AES-GCM', iv: iv as BufferSource },
-        key,
-        plaintext as BufferSource
-    ))
-
-    return concat(i2osp(wrapped.length, WRAPPED_LEN_PREFIX), wrapped, iv, ct)
-}
-
-/**
- * Like `encrypt`, but encodes the envelope bytes to a string — handy for
- * transports that carry text (JSON, URLs, headers). Decode with
- * `fromString(...)` (or any matching decoder) and pass the bytes to
- * `decrypt` / `decrypt.asString`. Exposed as `encrypt.asString`.
- *
- * @param recipient The recipient's X25519 public key, as a `CryptoKey`,
- *   `CryptoKeyPair` (its `.publicKey` is used), 32 raw bytes (`Uint8Array`),
- *   or `{ publicKey:string, encoding? }` (encoding defaults to `base64url`).
- * @param message Plaintext to encrypt. A `string` is UTF-8 encoded.
- * @param aesKey Optional key, as either an AES-GCM `CryptoKey` or its raw
- *   bytes (`Uint8Array`, 16 or 32 bytes). Omit to generate a fresh key of
- *   `opts.keysize` bits. A supplied `CryptoKey` MUST be extractable.
- * @param opts `keysize` (128/256, default 256; ignored when `aesKey` is
- *   supplied), `info` (bound into the HPKE key schedule), and `encoding`
- *   (the string encoding of the returned envelope; default `base64url`).
- * @returns The encoded envelope string.
- */
-async function encryptToString (
-    recipient:RecipientKey,
-    message:Uint8Array|string,
-    aesKey?:CryptoKey|Uint8Array|null,
-    opts?:{
-        keysize?:128|256
-        info?:Uint8Array|string
-        encoding?:SupportedEncodings
-    }
-):Promise<string> {
-    const envelope = await encryptBytes(recipient, message, aesKey, opts)
-    return toString(envelope, opts?.encoding ?? 'base64url')
-}
-
-/**
  * Seal an AES key to `recipient` and AES-GCM encrypt a message under it.
  * Call `encrypt(...)` for the raw envelope bytes, or `encrypt.asString(...)`
  * for the same envelope as an encoded string.
@@ -700,4 +622,82 @@ async function aeadOpen (
         ciphertext as BufferSource
     )
     return new Uint8Array(pt)
+}
+
+/**
+ * Seal a fresh (or supplied) AES key to `recipient`, then AES-GCM encrypt a
+ * message under it. The wrapped key, IV, and ciphertext are concatenated
+ * into a single self-describing envelope.
+ *
+ * Wire format: `wrappedLen(2, big-endian) ‖ wrapped ‖ iv(12) ‖ ciphertext`.
+ * The length prefix lets `decrypt` slice the segments apart for either
+ * 128- or 256-bit wrapped keys.
+ *
+ * @param recipient The recipient's X25519 public key, as a `CryptoKey`,
+ *   `CryptoKeyPair` (its `.publicKey` is used), 32 raw bytes (`Uint8Array`),
+ *   or `{ publicKey:string, encoding? }` (encoding defaults to `base64url`).
+ * @param message Plaintext to encrypt. A `string` is UTF-8 encoded.
+ * @param aesKey Optional key, as either an AES-GCM `CryptoKey` or its raw
+ *   bytes (`Uint8Array`, 16 or 32 bytes). Omit to generate a fresh key of
+ *   `opts.keysize` bits. A supplied `CryptoKey` MUST be extractable.
+ * @param opts `keysize` (128/256, default 256; ignored when `aesKey` is
+ *   supplied) and `info` (bound into the HPKE key schedule).
+ * @returns The concatenated envelope bytes.
+ *
+ * `encrypt.asString(...)` returns the same envelope as an encoded string.
+ */
+async function encryptBytes (
+    recipient:RecipientKey,
+    message:Uint8Array|string,
+    aesKey?:CryptoKey|Uint8Array|null,
+    opts?:{
+        keysize?:128|256
+        info?:Uint8Array|string
+    }
+):Promise<Uint8Array> {
+    const plaintext = typeof message === 'string' ?
+        new TextEncoder().encode(message) :
+        message
+
+    const { wrapped, key } = await seal(recipient, aesKey, opts)
+    const iv = globalThis.crypto.getRandomValues(new Uint8Array(NN))
+    const ct = new Uint8Array(await subtle.encrypt(
+        { name: 'AES-GCM', iv: iv as BufferSource },
+        key,
+        plaintext as BufferSource
+    ))
+
+    return concat(i2osp(wrapped.length, WRAPPED_LEN_PREFIX), wrapped, iv, ct)
+}
+
+/**
+ * Like `encrypt`, but encodes the envelope bytes to a string — handy for
+ * transports that carry text (JSON, URLs, headers). Decode with
+ * `fromString(...)` (or any matching decoder) and pass the bytes to
+ * `decrypt` / `decrypt.asString`. Exposed as `encrypt.asString`.
+ *
+ * @param recipient The recipient's X25519 public key, as a `CryptoKey`,
+ *   `CryptoKeyPair` (its `.publicKey` is used), 32 raw bytes (`Uint8Array`),
+ *   or `{ publicKey:string, encoding? }` (encoding defaults to `base64url`).
+ * @param message Plaintext to encrypt. A `string` is UTF-8 encoded.
+ * @param aesKey Optional key, as either an AES-GCM `CryptoKey` or its raw
+ *   bytes (`Uint8Array`, 16 or 32 bytes). Omit to generate a fresh key of
+ *   `opts.keysize` bits. A supplied `CryptoKey` MUST be extractable.
+ * @param opts `keysize` (128/256, default 256; ignored when `aesKey` is
+ *   supplied), `info` (bound into the HPKE key schedule), and `encoding`
+ *   (the string encoding of the returned envelope; default `base64url`).
+ * @returns The encoded envelope string.
+ */
+async function encryptToString (
+    recipient:RecipientKey,
+    message:Uint8Array|string,
+    aesKey?:CryptoKey|Uint8Array|null,
+    opts?:{
+        keysize?:128|256
+        info?:Uint8Array|string
+        encoding?:SupportedEncodings
+    }
+):Promise<string> {
+    const envelope = await encryptBytes(recipient, message, aesKey, opts)
+    return toString(envelope, opts?.encoding ?? 'base64url')
 }

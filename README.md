@@ -1,4 +1,4 @@
-# SImple HPKE
+# Simple HPKE
 [![tests](https://img.shields.io/github/actions/workflow/status/nichoth/simple-hpke/nodejs.yml?style=flat-square)](https://github.com/nichoth/simple-hpke/actions/workflows/nodejs.yml)
 [![types](https://img.shields.io/npm/types/@substrate-system/simple-hpke?style=flat-square)](README.md)
 [![module](https://img.shields.io/badge/module-ESM%2FCJS-blue?style=flat-square)](README.md)
@@ -72,10 +72,12 @@ const aesKey = await crypto.subtle.generateKey(
     true,  // extractable
     ['encrypt', 'decrypt']
 )
+
+// if you pass in a key, the return value is just the wrapped key
 const { wrapped } = await seal(keypair, aesKey)
 
 // Later, recover the same key with your private key.
-const recovered = await open(keypair, wrapped)
+const recoveredKey = await open(keypair, wrapped)
 ```
 
 See [docs/README.md](./docs/README.md) for the full API and rationale.
@@ -92,11 +94,11 @@ import { seal, open } from '@substrate-system/simple-hpke'
 
 const recipient = await crypto.subtle.generateKey(
     { name: 'X25519' },
-    false,  // extractable
+    false,  // not extractable
     ['deriveBits']
 )
 
-// Seal a fresh AES-GCM key, then encrypt a message under it.
+// Create and seal a fresh AES-GCM key, and encrypt a message with it.
 const { wrapped, key } = await seal(recipient)
 const iv = crypto.getRandomValues(new Uint8Array(12))
 const ciphertext = await crypto.subtle.encrypt(
@@ -108,11 +110,11 @@ const ciphertext = await crypto.subtle.encrypt(
 // Send `wrapped`, `iv`, and `ciphertext` together. `wrapped` is a fixed
 // 80 bytes for this suite, and the AES-GCM IV is 12 bytes, so the recipient
 // can slice the payload back apart at known offsets.
-const ct = new Uint8Array(ciphertext)
-const message = new Uint8Array(wrapped.length + iv.length + ct.length)
+const ciphertext = new Uint8Array(ciphertext)
+const message = new Uint8Array(wrapped.length + iv.length + ciphertext.length)
 message.set(wrapped, 0)
 message.set(iv, wrapped.length)
-message.set(ct, wrapped.length + iv.length)
+message.set(ciphertext, wrapped.length + iv.length)
 
 // On the other side, split the payload back into its parts.
 const wrapped2 = message.subarray(0, 80)
@@ -136,13 +138,15 @@ So that was a lot of code to encrypt and decrypt a message...
 This package exposes functions `encrypt` and `decrypt` which do the same thing.
 
 `encrypt` seals an AES key to the recipient, encrypts the message under
-it, and returns a single envelope: `wrappedLen + wrapped + iv + ciphertext`
+that key, and returns a single envelope: `wrappedLen + wrapped + iv + ciphertext`
 (a 2-byte length prefix, the wrapped key, the 12-byte AES-GCM IV, and the
 cipher text). `decrypt` reverses it, returning the plaintext bytes.
 
+>
 > [!NOTE]  
 > See `decrypt.asString` below for a convenient way to decrypt to a string.
-> See `encrypt.asString` for encrypting and econding to a string.
+> See `encrypt.asString` for encrypting and ecoding to a string.
+>
 
 
 ```ts
@@ -185,8 +189,7 @@ const anotherEncryptedMsg = await encrypt(
 
 ##### `encrypt`
 
-Encrypt can take a crypto key, a Uint8Array, or a string public key as
-the recipient.
+The recipient can be a crypto key, a Uint8Array, or a string public key.
 
 ```ts
 type RecipientKey =
@@ -217,9 +220,12 @@ import { encrypt, decrypt } from '@substrate-system/ecies'
 import { fromString } from 'uint8arrays'
 
 // recipient is any RecipientKey; keypair holds the matching private key
-const encryptedString = await encrypt.asString(recipient, 'message for them', null, {
-    encoding: 'base64url'
-})
+const encryptedString = await encrypt.asString(
+    recipient,
+    'message for them',
+    null,  // an AES key if you want
+    { encoding: 'base64url' }
+)
 
 // Decode it back to bytes before decrypting.
 const message = fromString(encryptedString, 'base64url')
@@ -232,6 +238,18 @@ recipient decodes it with a matching decoder (here `fromString`) and passes the
 bytes to `decrypt` / `decrypt.asString`.
 
 ##### `decrypt`
+
+```ts
+async function decrypt (
+    keypair:CryptoKeyPair,
+    message:Uint8Array,
+    opts?:{ info?:Uint8Array|string }
+):Promise<Uint8Array>
+```
+
+
+
+---------------------------------------------------------------
 
 ## Modules
 
