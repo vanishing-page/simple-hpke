@@ -54,7 +54,7 @@ Wrap an AES key, or encrypt a message.
 Encrypt an AES key to yourself, then recover it later.
 
 ```ts
-import { seal, open } from 'simple-hpke'
+import { create, seal, open } from 'simple-hpke'
 
 // An X25519 keypair. (asymmetric keypair).
 // The private key can be non-extractable.
@@ -65,8 +65,8 @@ const keypair = await crypto.subtle.generateKey(
     ['deriveBits']
 )
 
-// create a new AES key, and encrypt it to your public key.
-const { wrapped, key } = await seal(keypair)
+// Create a new AES key and encrypt it to your public key.
+const { enc, key } = await create(keypair)
 
 // Or wrap an existing AES key. The supplied AES key must be extractable.
 const aesKey = await crypto.subtle.generateKey(
@@ -75,11 +75,11 @@ const aesKey = await crypto.subtle.generateKey(
     ['encrypt', 'decrypt']
 )
 
-// pass in an existing key. The return value has the wrapped key.
-const { wrapped } = await seal(keypair, aesKey)
+// Wrap an existing key.
+const { enc: sealedKey } = await seal(keypair, aesKey)
 
 // Later, recover the same key with your private key.
-const recoveredKey = await open(keypair, wrapped)
+const recoveredKey = await open(keypair, sealedKey)
 
 // `recoveredKey` is equal to `aesKey`
 ```
@@ -98,7 +98,7 @@ along with the IV. The recipient uses their private key to open the AES key and
 decrypt the message.
 
 ```ts
-import { seal, open } from 'simple-hpke'
+import { create, open } from 'simple-hpke'
 
 const recipient = await crypto.subtle.generateKey(
     { name: 'X25519' },
@@ -106,31 +106,31 @@ const recipient = await crypto.subtle.generateKey(
     ['deriveBits']
 )
 
-// Create and seal a fresh AES-GCM key, and encrypt a message with it.
-const { wrapped, key } = await seal(recipient)
+// Create a fresh AES-GCM key, and encrypt a message with it.
+const { enc, key } = await create(recipient)
 const iv = crypto.getRandomValues(new Uint8Array(12))
-const ciphertext = await crypto.subtle.encrypt(
+const ciphertextBuffer = await crypto.subtle.encrypt(
     { name: 'AES-GCM', iv },
     key,
     new TextEncoder().encode('attack at dawn')
 )
 
-// Send `wrapped`, `iv`, and `ciphertext` together. `wrapped` is a fixed
+// Send `enc`, `iv`, and `ciphertext` together. `enc` is a fixed
 // 80 bytes for this suite, and the AES-GCM IV is 12 bytes, so the recipient
 // can slice the payload back apart at known offsets.
-const ciphertext = new Uint8Array(ciphertext)
-const message = new Uint8Array(wrapped.length + iv.length + ciphertext.length)
-message.set(wrapped, 0)
-message.set(iv, wrapped.length)
-message.set(ciphertext, wrapped.length + iv.length)
+const ciphertext = new Uint8Array(ciphertextBuffer)
+const message = new Uint8Array(enc.length + iv.length + ciphertext.length)
+message.set(enc, 0)
+message.set(iv, enc.length)
+message.set(ciphertext, enc.length + iv.length)
 
 // On the other side, split the payload back into its parts.
-const wrapped2 = message.subarray(0, 80)
+const enc2 = message.subarray(0, 80)
 const iv2 = message.subarray(80, 80 + 12)
 const ciphertext2 = message.subarray(80 + 12)
 
 // Recover the key, then decrypt the message.
-const recovered = await open(recipient, wrapped2)
+const recovered = await open(recipient, enc2)
 const plaintext = await crypto.subtle.decrypt(
     { name: 'AES-GCM', iv: iv2 },
     recovered,
@@ -146,7 +146,8 @@ So that was a lot of code to encrypt and decrypt a message...
 This package exposes functions `encrypt` and `decrypt` which do the same thing.
 
 `encrypt` seals an AES key to the recipient, encrypts the message under
-that key, and returns a single envelope: `wrappedLen + wrapped + iv + ciphertext`
+that key, and returns a single envelope:
+`wrappedLen + wrapped + iv + ciphertext`
 (a 2-byte length prefix, the wrapped key, the 12-byte AES-GCM IV, and the
 cipher text). `decrypt` reverses it, returning the plaintext bytes.
 
@@ -156,8 +157,8 @@ cipher text). `decrypt` reverses it, returning the plaintext bytes.
 > [`decrypt.fromString`](#decryptfromstring) below for a convenient way
 > to decrypt from a string.
 >
-> See [`encrypt.asString`](#encrypt-to-a-string) for encrypting and ecoding to
-> a string.
+> See [`encrypt.asString`](#encryptasstring) for encrypting and encoding to a
+> string.
 >
 
 
@@ -249,7 +250,7 @@ bytes to `decrypt` / `decrypt.asString`.
 
 ##### `decrypt`
 
-Descrypt the given data, return a `Uint8Array`.
+Decrypt the given data, return a `Uint8Array`.
 
 ```ts
 async function decrypt (
@@ -261,7 +262,7 @@ async function decrypt (
 
 ##### `decrypt.asString`
 
-Take a `Uint8Array`, return a sttring.
+Take a `Uint8Array`, return a string.
 
 ```ts
 decrypt.asString = async function decryptToString (
@@ -293,7 +294,7 @@ This exposes ESM and common JS via
 
 ### ESM
 ```js
-import { seal, open, encrypt, decrypt } from 'simple-hpke'
+import { create, seal, open, encrypt, decrypt } from 'simple-hpke'
 ```
 
 ### Common JS

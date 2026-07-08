@@ -3,7 +3,7 @@ import {
     fromString,
     type SupportedEncodings
 } from 'uint8arrays'
-import { seal } from './index.js'
+import { create, seal } from './index.js'
 import {
     WRAPPED_LEN_PREFIX,
     NN,
@@ -112,7 +112,19 @@ export async function encryptBytes (
         new TextEncoder().encode(message) :
         message
 
-    const { wrapped, key } = await seal(recipient, aesKey, opts)
+    let enc:Uint8Array<ArrayBufferLike>
+    let key:CryptoKey
+    if (!aesKey) {
+        const keys = await create(recipient, opts)
+        enc = keys.enc
+        key = keys.key
+    } else {
+        const keys = await seal(recipient, aesKey, opts)
+        enc = keys.enc
+        key = keys.key
+    }
+
+    // const { enc, key } = await seal(recipient, aesKey, opts)
     const iv = globalThis.crypto.getRandomValues(new Uint8Array(NN))
     const ct = new Uint8Array(await subtle.encrypt(
         { name: 'AES-GCM', iv: iv as BufferSource },
@@ -120,7 +132,7 @@ export async function encryptBytes (
         plaintext as BufferSource
     ))
 
-    return concat(i2osp(wrapped.length, WRAPPED_LEN_PREFIX), wrapped, iv, ct)
+    return concat(i2osp(enc.length, WRAPPED_LEN_PREFIX), enc, iv, ct)
 }
 
 /**

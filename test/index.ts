@@ -1,28 +1,28 @@
 import { test } from '@substrate-system/tapzero'
 import { toString, fromString } from 'uint8arrays'
-import { seal, open, encrypt, decrypt } from '../src/index.js'
 import { EccKeys } from '@substrate-system/keys/ecc'
+import { create, seal, open, encrypt, decrypt } from '../src/index.js'
 
 const subtle = globalThis.crypto.subtle
 
-test('seal and open round-trip', async t => {
+test('create and open round-trip', async t => {
     const kp = await genKeypair()
-    const { wrapped, key } = await seal(kp)
-    const recovered = await open(kp, wrapped)
+    const { enc, key } = await create(kp)
+    const recovered = await open(kp, enc)
 
     const keyRaw = await raw(key)
     const recoveredRaw = await raw(recovered)
 
     t.ok(
         bytesEqual(keyRaw, recoveredRaw),
-        'seal and open produce equal raw bytes'
+        'create and open produce equal raw bytes'
     )
 })
 
-test('seal and open keys are cross-usable', async t => {
+test('create and open keys are cross-usable', async t => {
     const kp = await genKeypair()
-    const { wrapped, key } = await seal(kp)
-    const recovered = await open(kp, wrapped)
+    const { enc, key } = await create(kp)
+    const recovered = await open(kp, enc)
 
     // Encrypt under key, decrypt under recovered
     const plaintext1 = new TextEncoder().encode('hello')
@@ -71,8 +71,8 @@ test('seal/open with caller-supplied key', async t => {
         ['encrypt', 'decrypt']
     )
 
-    const { wrapped } = await seal(kp, myKey)
-    const recovered = await open(kp, wrapped)
+    const { enc } = await seal(kp, myKey)
+    const recovered = await open(kp, enc)
 
     const myRaw = await raw(myKey)
     const recoveredRaw = await raw(recovered)
@@ -87,8 +87,8 @@ test('seal/open with raw Uint8Array key', async t => {
     const kp = await genKeypair()
     const rawKey = globalThis.crypto.getRandomValues(new Uint8Array(32))
 
-    const { wrapped } = await seal(kp, rawKey)
-    const recovered = await open(kp, wrapped)
+    const { enc } = await seal(kp, rawKey)
+    const recovered = await open(kp, enc)
 
     t.ok(
         bytesEqual(rawKey, await raw(recovered)),
@@ -100,8 +100,8 @@ test('seal with 16-byte raw key round-trips', async t => {
     const kp = await genKeypair()
     const rawKey = globalThis.crypto.getRandomValues(new Uint8Array(16))
 
-    const { wrapped } = await seal(kp, rawKey)
-    const recovered = await open(kp, wrapped)
+    const { enc } = await seal(kp, rawKey)
+    const recovered = await open(kp, enc)
 
     t.ok(
         bytesEqual(rawKey, await raw(recovered)),
@@ -157,28 +157,28 @@ test('CryptoKey exporting to invalid-length bytes throws', async t => {
     )
 })
 
-test('keysize 128 and 256 produce correct byte lengths', async t => {
+test('size 128 and 256 produce correct byte lengths', async t => {
     const kp = await genKeypair()
 
-    // keysize: 128
-    const sealed128 = await seal(kp, null, { keysize: 128 })
-    const recovered128 = await open(kp, sealed128.wrapped)
+    // size: 128
+    const created128 = await create(kp, { size: 128 })
+    const recovered128 = await open(kp, created128.enc)
     const raw128 = await raw(recovered128)
-    t.equal(raw128.byteLength, 16, 'keysize 128 → 16 bytes')
+    t.equal(raw128.byteLength, 16, 'size 128 -> 16 bytes')
 
-    // keysize: 256
-    const sealed256 = await seal(kp, null, { keysize: 256 })
-    const recovered256 = await open(kp, sealed256.wrapped)
+    // size: 256
+    const created256 = await create(kp, { size: 256 })
+    const recovered256 = await open(kp, created256.enc)
     const raw256 = await raw(recovered256)
-    t.equal(raw256.byteLength, 32, 'keysize 256 → 32 bytes')
+    t.equal(raw256.byteLength, 32, 'size 256 -> 32 bytes')
 })
 
 test('open.raw returns raw bytes for 32-byte key', async t => {
     const kp = await genKeypair()
     const originalKey = globalThis.crypto.getRandomValues(new Uint8Array(32))
 
-    const { wrapped } = await seal(kp, originalKey)
-    const recoveredBytes = await open.raw(kp, wrapped)
+    const { enc } = await seal(kp, originalKey)
+    const recoveredBytes = await open.raw(kp, enc)
 
     t.ok(
         bytesEqual(originalKey, recoveredBytes),
@@ -190,8 +190,8 @@ test('open.raw returns raw bytes for 16-byte key', async t => {
     const kp = await genKeypair()
     const originalKey = globalThis.crypto.getRandomValues(new Uint8Array(16))
 
-    const { wrapped } = await seal(kp, originalKey)
-    const recoveredBytes = await open.raw(kp, wrapped)
+    const { enc } = await seal(kp, originalKey)
+    const recoveredBytes = await open.raw(kp, enc)
 
     t.ok(
         bytesEqual(originalKey, recoveredBytes),
@@ -201,10 +201,10 @@ test('open.raw returns raw bytes for 16-byte key', async t => {
 
 test('open.raw and open return equivalent key bytes', async t => {
     const kp = await genKeypair()
-    const { wrapped } = await seal(kp)
+    const { enc } = await create(kp)
 
-    const recoveredViaCryptoKey = await open(kp, wrapped)
-    const recoveredViaRawBytes = await open.raw(kp, wrapped)
+    const recoveredViaCryptoKey = await open(kp, enc)
+    const recoveredViaRawBytes = await open.raw(kp, enc)
     const cryptoKeyAsRaw = await raw(recoveredViaCryptoKey)
 
     t.ok(
@@ -238,11 +238,11 @@ test('open.raw with wrong keypair throws', async t => {
     const kpA = await genKeypair()
     const kpB = await genKeypair()
 
-    const { wrapped } = await seal(kpA)
+    const { enc } = await create(kpA)
 
     let threw = false
     try {
-        await open.raw(kpB, wrapped)
+        await open.raw(kpB, enc)
     } catch (_e) {
         threw = true
     }
@@ -252,9 +252,9 @@ test('open.raw with wrong keypair throws', async t => {
 
 test('open.raw with tampered ciphertext throws', async t => {
     const kp = await genKeypair()
-    const { wrapped } = await seal(kp)
+    const { enc } = await create(kp)
 
-    const copy = new Uint8Array(wrapped)
+    const copy = new Uint8Array(enc)
     copy[copy.length - 1] ^= 1
 
     let threw = false
@@ -272,12 +272,12 @@ test('open.raw with mismatched info throws',
         const kp = await genKeypair()
 
         // Seal with 'abc'
-        const { wrapped } = await seal(kp, null, { info: 'abc' })
+        const { enc } = await create(kp, { info: 'abc' })
 
         // Attempt open.raw with mismatched 'xyz'
         let threw = false
         try {
-            await open.raw(kp, wrapped, { info: 'xyz' })
+            await open.raw(kp, enc, { info: 'xyz' })
         } catch (_e) {
             threw = true
         }
@@ -285,7 +285,7 @@ test('open.raw with mismatched info throws',
         t.ok(threw, 'mismatched info rejected by open.raw')
 
         // Verify matching info succeeds
-        const recovered = await open.raw(kp, wrapped, { info: 'abc' })
+        const recovered = await open.raw(kp, enc, { info: 'abc' })
         t.ok(recovered.byteLength > 0, 'matching info round-trips')
     }
 )
@@ -337,7 +337,7 @@ test('ephemeral encap keypair is generated non-extractable', async t => {
     }) as typeof subtle.generateKey
 
     try {
-        await seal(kp)
+        await create(kp)
     } finally {
         subtle.generateKey = originalGenerateKey
     }
@@ -371,7 +371,7 @@ test('all-zero DH output is rejected', async t => {
     let threw = false
     let errorMessage = ''
     try {
-        await seal(kp)
+        await create(kp)
     } catch (e) {
         threw = true
         if (e instanceof Error) errorMessage = e.message
@@ -386,17 +386,17 @@ test('all-zero DH output is rejected', async t => {
     )
 })
 
-test('invalid keysize throws', async t => {
+test('invalid size throws', async t => {
     const kp = await genKeypair()
 
     let threw = false
     try {
-        await seal(kp, null, { keysize: 100 as any })
+        await create(kp, { size: 100 as any })
     } catch (_e) {
         threw = true
     }
 
-    t.ok(threw, 'invalid keysize throws during seal')
+    t.ok(threw, 'invalid size throws during create')
 })
 
 test('sealing the same key twice yields different envelopes',
@@ -411,7 +411,7 @@ test('sealing the same key twice yields different envelopes',
         const a = await seal(kp, myKey)
         const b = await seal(kp, myKey)
 
-        const same = bytesEqual(a.wrapped, b.wrapped)
+        const same = bytesEqual(a.enc, b.enc)
         t.ok(!same, 'two seals of same key produce different envelopes')
     }
 )
@@ -426,10 +426,10 @@ async function eccKeypair ():Promise<CryptoKeyPair> {
     }
 }
 
-test('EccKeys keypair round-trip seal/open', async t => {
+test('EccKeys keypair round-trip create/open', async t => {
     const kp = await eccKeypair()
-    const { wrapped, key } = await seal(kp)
-    const recovered = await open(kp, wrapped)
+    const { enc, key } = await create(kp)
+    const recovered = await open(kp, enc)
 
     const keyRaw = await raw(key)
     const recoveredRaw = await raw(recovered)
@@ -454,8 +454,8 @@ test('EccKeys getters assemble working keypair',
             ['encrypt', 'decrypt']
         )
 
-        const { wrapped } = await seal(kp, myKey)
-        const recovered = await open(kp, wrapped)
+        const { enc } = await seal(kp, myKey)
+        const recovered = await open(kp, enc)
 
         const myRaw = await raw(myKey)
         const recoveredRaw = await raw(recovered)
@@ -471,9 +471,9 @@ test('EccKeys getters assemble working keypair',
 
 test('tampered envelope causes open to reject', async t => {
     const kp = await genKeypair()
-    const { wrapped } = await seal(kp)
+    const { enc } = await create(kp)
 
-    const copy = new Uint8Array(wrapped)
+    const copy = new Uint8Array(enc)
     copy[copy.length - 1] ^= 0xff
 
     let threw = false
@@ -490,11 +490,11 @@ test('wrong keypair causes open to reject', async t => {
     const kpA = await genKeypair()
     const kpB = await genKeypair()
 
-    const { wrapped } = await seal(kpA)
+    const { enc } = await create(kpA)
 
     let threw = false
     try {
-        await open(kpB, wrapped)
+        await open(kpB, enc)
     } catch (_e) {
         threw = true
     }
@@ -507,12 +507,12 @@ test('mismatched info causes rejection, matching succeeds',
         const kp = await genKeypair()
 
         // Seal with 'context-a'
-        const { wrapped, key } = await seal(kp, null, { info: 'context-a' })
+        const { enc, key } = await create(kp, { info: 'context-a' })
 
         // Attempt open with mismatched 'context-b'
         let threw = false
         try {
-            await open(kp, wrapped, { info: 'context-b' })
+            await open(kp, enc, { info: 'context-b' })
         } catch (_e) {
             threw = true
         }
@@ -520,7 +520,7 @@ test('mismatched info causes rejection, matching succeeds',
         t.ok(threw, 'mismatched info rejected')
 
         // Verify matching info succeeds
-        const recovered = await open(kp, wrapped, { info: 'context-a' })
+        const recovered = await open(kp, enc, { info: 'context-a' })
         t.ok(bytesEqual(await raw(key), await raw(recovered)),
             'matching info round-trips to identical bytes'
         )
@@ -598,7 +598,11 @@ test('encrypt/decrypt honors matching info, rejects mismatch',
         const kp = await genKeypair()
         const envelope = await encrypt(kp, 'bound', null, { info: 'ctx-a' })
 
-        const plaintext = await decrypt.asString(kp, envelope, { info: 'ctx-a' })
+        const plaintext = await decrypt.asString(
+            kp,
+            envelope,
+            { info: 'ctx-a' }
+        )
         t.equal(plaintext, 'bound', 'matching info decrypts')
 
         let threw = false
@@ -720,7 +724,9 @@ test('decrypt imports the message key non-extractable, decrypt-only',
     }
 )
 
-test('encrypt.asString round-trips through fromString and decrypt (default encoding)',
+test(
+    'encrypt.asString round-trips through fromString and decrypt ' +
+    '(default encoding)',
     async t => {
         const kp = await genKeypair()
         const str = await encrypt.asString(kp, 'hello asString')
@@ -789,13 +795,13 @@ test('encrypt to a bare public CryptoKey', async t => {
     t.equal(plaintext, 'to a public key', 'public-key recipient round-trips')
 })
 
-test('seal to a bare public CryptoKey', async t => {
+test('create to a bare public CryptoKey', async t => {
     const kp = await genKeypair()
-    const { wrapped, key } = await seal(kp.publicKey)
-    const recovered = await open(kp, wrapped)
+    const { enc, key } = await create(kp.publicKey)
+    const recovered = await open(kp, enc)
     t.ok(
         bytesEqual(await raw(key), await raw(recovered)),
-        'sealing to a public key round-trips'
+        'creating to a public key round-trips'
     )
 })
 
@@ -907,7 +913,7 @@ test('recipient with non-X25519 public key throws a clear error',
 test('open with a non-X25519 private key throws a clear error',
     async t => {
         const kp = await genKeypair()
-        const { wrapped } = await seal(kp)
+        const { enc } = await create(kp)
 
         const wrongAlgKeyPair = await subtle.generateKey(
             { name: 'ECDSA', namedCurve: 'P-256' },
@@ -918,7 +924,7 @@ test('open with a non-X25519 private key throws a clear error',
         let threw = false
         let errorMessage = ''
         try {
-            await open(wrongAlgKeyPair, wrapped)
+            await open(wrongAlgKeyPair, enc)
         } catch (e) {
             threw = true
             if (e instanceof Error) errorMessage = e.message

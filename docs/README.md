@@ -1,71 +1,83 @@
-# seal / open: AES-GCM Key Wrapping with HPKE
+# create / seal / open
 
-Wrap a symmetric AES key to your own X25519 keypair using RFC 9180 HPKE.
-This is a self-encryption pattern: you seal a key now, unseal it later with
-the same keypair (e.g., re-sealing a key to a new device). The API works in
-modern browsers and Node.js via WebCrypto.
+Wrap AES keys to an X25519 recipient with HPKE
+([RFC 9180](https://www.rfc-editor.org/rfc/rfc9180.html)).
+
+Use:
+
+- `create(...)` when you want this package to generate a fresh AES-GCM key.
+- `seal(...)` when you already have the AES key bytes you want to wrap.
+- `open(...)` or `open.raw(...)` to recover that key later.
+
+The API works in modern browsers and in Node.js via WebCrypto.
 
 ## API
+
+### create
+
+```ts
+create(
+    recipient:RecipientKey,
+    opts?:{
+        size?:128|256
+        info?:Uint8Array|string
+    }
+):Promise<{ enc:Uint8Array; key:CryptoKey }>
+```
+
+Generate a fresh AES-GCM key, wrap it to `recipient`, and return both:
+
+- `enc`: the wrapped envelope bytes to store or send
+- `key`: the generated AES-GCM `CryptoKey`
+
+`size` defaults to `256`.
 
 ### seal
 
 ```ts
 seal(
     recipient:RecipientKey,
-    aesKey?:CryptoKey|Uint8Array|null,
-    opts?:HpkeOpts
-):Promise<{ wrapped:Uint8Array; key:CryptoKey }>
+    aesKey:CryptoKey|Uint8Array|null,
+    opts?:{ info?:Uint8Array|string }
+):Promise<{ enc:Uint8Array; key:CryptoKey }>
 ```
 
-Wrap an AES key to a recipient's public key.
+Wrap an existing AES key to `recipient`.
 
-**Parameters:**
-- `recipient`: The recipient's X25519 public key. See
-  [`RecipientKey`](#recipientkey) for the accepted forms — a `CryptoKey`, a
-  `CryptoKeyPair` (its `.publicKey` is used), 32 raw bytes, or an encoded
-  string. Encryption never needs the private key.
-- `aesKey`: Optional key to seal, as either an AES-GCM `CryptoKey` or its raw
-  bytes (`Uint8Array`, 16 or 32 bytes). Omit to generate a fresh extractable
-  key of `opts.keysize` bits. A supplied `CryptoKey` MUST be extractable (its
-  raw bytes are sealed).
-- `opts`: `HpkeOpts` — optional `keysize` and `info`.
+- `aesKey` may be an extractable AES-GCM `CryptoKey`
+- `aesKey` may also be raw key bytes as a `Uint8Array`
+- Raw keys must be 16 or 32 bytes
 
-**Returns:** An object with `wrapped` (the envelope bytes) and `key` (a
-usable AES-GCM `CryptoKey` — for a supplied `aesKey`, a re-import of the same
-key bytes with encrypt/decrypt usages; otherwise the newly generated key).
+Returns:
+
+- `enc`: the wrapped envelope bytes to store or send
+- `key`: a usable AES-GCM `CryptoKey` with the same raw bytes
 
 ### open
 
 ```ts
 open(
     keypair:CryptoKeyPair,
-    wrapped:Uint8Array,
+    enc:Uint8Array,
     opts?:{ info?:Uint8Array|string }
 ):Promise<CryptoKey>
 ```
 
-Recover an AES key that was wrapped with `seal`, using your private key.
+Recover an AES-GCM `CryptoKey` from the `enc` bytes returned by `create` or
+`seal`.
 
-**Parameters:**
-- `keypair`: The same X25519 `CryptoKeyPair` used to seal.
-- `wrapped`: The envelope returned by `seal` (`enc ‖ ciphertext`).
-- `opts`: Optional `info` — must match the value passed to `seal`.
-
-**Returns:** The recovered AES-GCM `CryptoKey` (extractable).
-
-### HpkeOpts
+### open.raw
 
 ```ts
-type HpkeOpts = {
-    keysize?:128|256
-    info?:Uint8Array|string
-}
+open.raw(
+    keypair:CryptoKeyPair,
+    enc:Uint8Array,
+    opts?:{ info?:Uint8Array|string }
+):Promise<Uint8Array>
 ```
 
-- `keysize`: Size in bits of the generated AES key. Defaults to 256. Ignored
-  when an `aesKey` is supplied to `seal`.
-- `info`: Bound into the HPKE key schedule for domain separation. Defaults to
-  empty. Must match between `seal` and `open`.
+Like `open(...)`, but returns raw key bytes instead of importing them as a
+`CryptoKey`.
 
 ### RecipientKey
 
@@ -77,184 +89,84 @@ type RecipientKey =
     | { publicKey:string; encoding?:Uint8ArrayEncodings }
 ```
 
-The recipient argument of `seal` and `encrypt`. All four forms name the same
-thing — the recipient's X25519 public key:
+`create`, `seal`, and `encrypt` all accept the same recipient forms:
 
-- `CryptoKey`: an X25519 public key.
-- `CryptoKeyPair`: only its `.publicKey` is used (encryption never touches the
-  private key). This is the self-wrap case — seal to your own keypair.
-- `Uint8Array`: 32 raw X25519 public-key bytes.
-- `{ publicKey, encoding? }`: the public key as an encoded string. `encoding`
-  is a `Uint8ArrayEncodings` (re-exported from `uint8arrays`) and defaults to
-  `base64url`.
+- an X25519 public `CryptoKey`
+- a full `CryptoKeyPair` where only `.publicKey` is used
+- 32 raw X25519 public-key bytes
+- an encoded public-key string, defaulting to `base64url`
 
-`open` and `decrypt` are unaffected — they need the private key, so they still
-take a full `CryptoKeyPair`.
+`open` and `decrypt` still require the full recipient `CryptoKeyPair`.
 
-### Wire Format
+## Examples
 
-The wrapped output is 80 bytes (for a 256-bit key) or 64 bytes (for a 128-bit
-key):
-
-```
-enc(32 bytes) ‖ ciphertext
-```
-
-- `enc`: The 32-byte X25519 encapsulated secret (ephemeral public key).
-- `ciphertext`: The AES-256-GCM ciphertext (key bytes + 16-byte auth tag).
-
-No salt or IV is stored; HPKE derives the AEAD nonce internally from the key
-schedule.
-
-## Usage
-
-### Generate a new key
+### Generate and wrap a new key
 
 ```ts
-import { seal, open } from '@substrate-system/ecies'
-import { EccKeys } from '@substrate-system/keys/ecc'
+import { create, open } from 'simple-hpke'
 
-// Create a fresh keypair
-const keys = await EccKeys.create()
-const keypair = {
-    publicKey: keys.publicExchangeKey,
-    privateKey: keys.privateExchangeKey
-}
+const keypair = await crypto.subtle.generateKey(
+    { name: 'X25519' },
+    false,
+    ['deriveBits']
+)
 
-// Seal a fresh key (no aesKey parameter)
-const { wrapped, key } = await seal(keypair)
+const { enc, key } = await create(keypair, { size: 256 })
+const recovered = await open(keypair, enc)
 
-// Later: unseal it with the same keypair
-const recovered = await open(keypair, wrapped)
-
-// Both key and recovered are usable AES-GCM CryptoKeys
+// `key` and `recovered` hold the same AES key bytes.
 ```
 
-### Bring your own AES key
+### Wrap an existing AES key
 
 ```ts
-import { seal, open } from '@substrate-system/ecies'
+import { seal, open } from 'simple-hpke'
 
-// Suppose you have an existing AES-GCM key (see "Generate a new key" for keypair)
-const myKey = await crypto.subtle.importKey(
-    'raw',
-    new Uint8Array(32),
-    { name: 'AES-GCM' },
-    true,  // Must be extractable
+const myKey = await crypto.subtle.generateKey(
+    { name: 'AES-GCM', length: 256 },
+    true,
     ['encrypt', 'decrypt']
 )
 
-// Seal it with a specific keysize (ignored when aesKey is supplied)
-const { wrapped, key } = await seal(keypair, myKey, { keysize: 256 })
-
-// Recover the same key later
-const recovered = await open(keypair, wrapped)
+const { enc } = await seal(keypair, myKey)
+const recovered = await open(keypair, enc)
 ```
 
-### Seal raw key bytes
+### Wrap raw AES key bytes
 
 ```ts
-import { seal, open } from '@substrate-system/ecies'
+import { seal, open } from 'simple-hpke'
 
-// A raw 16- or 32-byte AES key — no CryptoKey import needed
 const rawKey = crypto.getRandomValues(new Uint8Array(32))
-
-// seal accepts the bytes directly (see "Generate a new key" for keypair)
-const { wrapped } = await seal(keypair, rawKey)
-
-// open returns a usable AES-GCM CryptoKey with the same bytes
-const recovered = await open(keypair, wrapped)
+const { enc } = await seal(keypair, rawKey)
+const recovered = await open.raw(keypair, enc)
 ```
 
-### Encrypt to someone else's public key
-
-You do not need a keypair to encrypt — only the recipient's public key. It can
-be a `CryptoKey`, 32 raw bytes, or an encoded string.
+### Bind context with info
 
 ```ts
-import { encrypt } from '@substrate-system/ecies'
-
-// The recipient shares their X25519 public key as a base64url string
-const recipient = { publicKey: 'aGVsbG8...', encoding: 'base64url' }
-
-// encoding defaults to base64url, so this is equivalent:
-// const recipient = { publicKey: 'aGVsbG8...' }
-
-const envelope = await encrypt(recipient, 'a message for them')
-
-// Only the recipient, holding the matching private key, can decrypt.
+const { enc } = await create(keypair, { info: 'my-app:v1' })
+const recovered = await open(keypair, enc, { info: 'my-app:v1' })
 ```
 
-### With domain separation (info)
+`info` must match on both sides.
 
-```ts
-// keypair and myKey from examples above
-const { wrapped } = await seal(keypair, myKey, {
-    info: 'my-app:v1'
-})
+## Wire Format
 
-// info must match on unseal
-const key = await open(keypair, wrapped, { info: 'my-app:v1' })
+The `enc` value returned by `create` and `seal` is the HPKE envelope:
+
+```txt
+encapsulated_public_key(32 bytes) || ciphertext
 ```
 
-## Why HPKE
+Its length is:
 
-### Ephemeral-static ECDH
+- 64 bytes for a 128-bit AES key
+- 80 bytes for a 256-bit AES key
 
-HPKE's KEM uses a fresh ephemeral key pair per seal against your static
-public key. Each seal produces a different envelope for the same input,
-giving semantic security (RFC 9180 §7.1.3). The encapsulated secret travels
-unencrypted; only the key bytes are sealed.
+## Related APIs
 
-### HKDF Extract-then-Expand
-
-The raw ECDH output is fragile. Running it through HKDF-SHA256 (Extract →
-Expand) stretches the shared secret, adds entropy, and derives distinct
-keys for different purposes without single-output reuse attacks (RFC 5869
-§2; RFC 9180 §7.1.3).
-
-### Standardized over bespoke ECIES
-
-RFC 9180 HPKE defines a single, interoperable cipher suite with rigorous
-security review. Older ECIES implementations vary widely (Diffie-Hellman
-variant, KDF choice, encoding). A standard key schedule and domain separation
-via `info` prevent misuse.
-
-### Non-extractable private keys
-
-HPKE needs only `deriveBits` on the private key. Your X25519 private key
-never leaves the WebCrypto boundary and can stay non-extractable (W3C
-WebCrypto / WICG Secure Curves). This hardens key isolation.
-
-### Nonce safety
-
-The AEAD nonce is derived from the key schedule, not stored or transmitted.
-Each seal uses a fresh ephemeral, so there's no AES-GCM nonce-reuse window
-(RFC 9180 §7.2.2).
-
-This applies to the key-wrapping AEAD inside `seal`/`open`, not the
-message AEAD in `encrypt`/`decrypt`. `encrypt` generates a fresh random
-96-bit IV per call for the message ciphertext, which is safe for a fresh
-or infrequently reused `aesKey`. If you pass the *same* `aesKey` into many
-`encrypt` calls, those random IVs carry the standard birthday bound for
-96-bit random nonces: collision risk becomes non-negligible around 2^32
-messages under one key (NIST SP 800-38D). Prefer a fresh `aesKey` per
-`encrypt` call (the default), or track a counter/sequence-based IV
-yourself if you must reuse one key at scale.
-
-### info binding
-
-Passing `info` to both `seal` and `open` binds context (e.g., an application
-name or version) into the key schedule without changing the wire format. This
-provides domain separation and prevents key material from leaking across
-application boundaries (RFC 9180 §7.2.1).
-
-## Relationship to @substrate-system/keys
-
-`@substrate-system/keys` (via `EccKeys`) can create keypairs you can pass
-here. The two share a keypair, but they're **not wire-compatible**: the
-`EccKeys` `wrap`/`unwrap` methods use a different internal protocol than this
-package's standardized HPKE. This package implements the RFC 9180 key schedule
-first-party on WebCrypto — the only runtime dependency is `uint8arrays` (the
-same encoder `@substrate-system/keys` uses), and it touches no crypto: it
-decodes a string-form public key into bytes, nothing more.
+- `encrypt(...)` and `decrypt(...)` build on the same wrapping logic, but
+  also AES-GCM encrypt a message payload.
+- `encrypt.asString(...)` and `decrypt.fromString(...)` add string encoding
+  helpers for transport.

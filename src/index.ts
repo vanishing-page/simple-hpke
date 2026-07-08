@@ -23,7 +23,8 @@ import {
 } from './constants'
 
 // RFC 9180 HPKE cipher suite
-// (DHKEM(X25519, HKDF-SHA256) + HKDF-SHA256 + AES-256-GCM, base mode, single-shot)
+// (DHKEM(X25519, HKDF-SHA256) + HKDF-SHA256 + AES-256-GCM,
+// base mode, single-shot)
 // - Pure helpers build the labeled byte strings
 // - all crypto runs through WebCrypto's subtle API so the X25519 private
 //   key can stay non-extractable (HPKE needs only `deriveBits`).
@@ -31,109 +32,51 @@ import {
 const subtle = globalThis.crypto.subtle
 
 /**
- * Wrap an AES key to a recipient's public key.
+ * Create a new AES key for the given public key.
  *
- * @param recipient The recipient's X25519 public key, as a `CryptoKey`,
- *   `CryptoKeyPair` (its `.publicKey` is used), 32 raw bytes (`Uint8Array`),
- *   or `{ publicKey:string, encoding? }` (encoding defaults to `base64url`).
- * @param aesKey Optional key to seal, as either an AES-GCM `CryptoKey` or its
- *   raw bytes (`Uint8Array`, 16 or 32 bytes). Omit to generate a fresh
- *   extractable key of `opts.keysize` bits. A supplied `CryptoKey` MUST be
- *   extractable (its raw bytes are sealed).
- * @param opts `keysize` (128/256, default 256; ignored when `aesKey` is
- *   supplied) and `info` (bound into the HPKE key schedule; default empty).
- * @returns { wrapped:Uint8Array, key:CryptoKey } The envelope bytes and a
- *   usable AES-GCM `CryptoKey`.
+ * @param recipient Public key for decryptor
+ * @param opts `size` and `info`
+ * @returns {{ enc, key }} The wrapped envelope bytes and the generated
+ *   AES-GCM key.
  */
-export async function seal (
+export async function create (
     recipient:RecipientKey,
-    aesKey?:CryptoKey|Uint8Array|null,
     opts?:{
         // Size of the GENERATED AES key. Ignored when an `aesKey` is supplied.
-        keysize?:128|256
+        size?:128|256
         // HPKE `info`: bound into the key schedule; must match on seal + open.
         info?:Uint8Array|string
     }
-):Promise<{ wrapped:Uint8Array; key:CryptoKey }> {
-    const info = normalizeInfo(opts?.info)
-
-    let keyBytes:Uint8Array
-    if (aesKey instanceof Uint8Array) {
-        validateRawKeyBytes(aesKey)
-        keyBytes = aesKey
-    } else if (aesKey) {  // if given a CryptoKey
-        keyBytes = await exportAesKeyBytes(aesKey)
-        validateRawKeyBytes(keyBytes)
-    } else {  // generate a key
-        const keysize = opts?.keysize ?? 256
-        validateKeysize(keysize)
-        keyBytes = globalThis.crypto.getRandomValues(
-            new Uint8Array(keysize / 8)
-        )
-    }
-
-    const publicKey = await resolveRecipientPublicKey(recipient)
-    const { sharedSecret, enc } = await encap(publicKey)
-    const { key, baseNonce } = await keySchedule(sharedSecret, info)
-    const ciphertext = await aeadSeal(key, baseNonce, keyBytes)
-
-    const wrapped = concat(enc, ciphertext)
-    const aesGcmKey = await importAesKey(keyBytes)
-    return { wrapped, key: aesGcmKey }
+):Promise<{ enc:Uint8Array<ArrayBufferLike>, key:CryptoKey }> {
+    const { wrapped, key } = await encryptKey(recipient, null, opts)
+    return { enc: wrapped, key }
 }
 
 /**
- * Recover the AES key wrapped by `seal`. Call `open(...)` for a usable
- * AES-GCM `CryptoKey`, or `open.raw(...)` for the raw key bytes.
+ * Encrypt the given AES key to the given public key.
+ *
+ * @returns {{ enc, key }} The wrapped envelope bytes and a usable AES-GCM
+ *   key with the same raw bytes as `aesKey`.
+ */
+export async function seal (
+    recipient:RecipientKey,
+    aesKey:CryptoKey|Uint8Array|null,
+    opts?:{
+        // HPKE `info`: bound into the key schedule; must match on seal + open.
+        info?:Uint8Array|string
+    }
+):Promise<{ enc:Uint8Array<ArrayBufferLike>, key:CryptoKey }> {
+    const { wrapped, key } = await encryptKey(recipient, aesKey, opts)
+    return { enc: wrapped, key }
+}
+
+/**
+ * Recover the AES key wrapped by `create` or `seal`. Call `open(...)` for a
+ * usable AES-GCM `CryptoKey`, or `open.raw(...)` for the raw key bytes.
  */
 export const open = Object.assign(openBytes, {
     raw: openRawBytes
 })
-
-/**
- * Recover an AES key that was wrapped with `seal`, using your private key.
- *
- * @param keypair The same X25519 `CryptoKeyPair` used to seal.
- * @param wrapped The envelope returned by `seal` (`enc ‖ ciphertext`).
- * @param opts `info` — must match the value passed to `seal`.
- * @returns The recovered AES-GCM `CryptoKey` (extractable).
- */
-async function openBytes (
-    keypair:CryptoKeyPair,
-    wrapped:Uint8Array,
-    opts?:{ info:Uint8Array|string }
-):Promise<CryptoKey> {
-    const keyBytes = await openRawBytes(keypair, wrapped, opts)
-    return importAesKey(keyBytes)
-}
-
-/**
- * Like `open`, but returns the recovered key as raw bytes instead of
- * importing it as an AES-GCM `CryptoKey`. Exposed as `open.raw`.
- *
- * @param keypair The same X25519 `CryptoKeyPair` used to seal.
- * @param wrapped The envelope returned by `seal` (`enc ‖ ciphertext`).
- * @param opts `info` — must match the value passed to `seal`.
- * @returns The recovered key bytes (16 or 32 bytes, matching whatever
- *   was sealed).
- */
-async function openRawBytes (
-    keypair:CryptoKeyPair,
-    wrapped:Uint8Array,
-    opts?:{ info:Uint8Array|string }
-):Promise<Uint8Array> {
-    if (wrapped.byteLength < ENC_LENGTH + AEAD_TAG_LENGTH) {
-        throw new Error('malformed envelope: too short')
-    }
-
-    const info = normalizeInfo(opts?.info)
-    const enc = wrapped.slice(0, ENC_LENGTH)
-    const ciphertext = wrapped.slice(ENC_LENGTH)
-
-    const sharedSecret = await decap(enc, keypair)
-    const { key, baseNonce } = await keySchedule(sharedSecret, info)
-    return aeadOpen(key, baseNonce, ciphertext)
-}
 
 /**
  * Seal an AES key to `recipient` and AES-GCM encrypt a message under it.
@@ -362,4 +305,102 @@ async function keySchedule (
         NN
     )
     return { key, baseNonce }
+}
+
+/**
+ * Like `open`, but returns the recovered key as raw bytes instead of
+ * importing it as an AES-GCM `CryptoKey`. Exposed as `open.raw`.
+ *
+ * @param keypair The same X25519 `CryptoKeyPair` used to create or seal.
+ * @param wrapped The `enc` bytes returned by `create` or `seal`.
+ * @param opts `info` — must match the value passed to `create` or `seal`.
+ * @returns The recovered key bytes (16 or 32 bytes, matching whatever
+ *   was wrapped).
+ */
+async function openRawBytes (
+    keypair:CryptoKeyPair,
+    wrapped:Uint8Array,
+    opts?:{ info:Uint8Array|string }
+):Promise<Uint8Array> {
+    if (wrapped.byteLength < ENC_LENGTH + AEAD_TAG_LENGTH) {
+        throw new Error('malformed envelope: too short')
+    }
+
+    const info = normalizeInfo(opts?.info)
+    const enc = wrapped.slice(0, ENC_LENGTH)
+    const ciphertext = wrapped.slice(ENC_LENGTH)
+
+    const sharedSecret = await decap(enc, keypair)
+    const { key, baseNonce } = await keySchedule(sharedSecret, info)
+    return aeadOpen(key, baseNonce, ciphertext)
+}
+
+/**
+ * Recover an AES key that was wrapped with `create` or `seal`.
+ *
+ * @param keypair The same X25519 `CryptoKeyPair` used to create or seal.
+ * @param wrapped The `enc` bytes returned by `create` or `seal`.
+ * @param opts `info` — must match the value passed to `create` or `seal`.
+ * @returns The recovered AES-GCM `CryptoKey` (extractable).
+ */
+async function openBytes (
+    keypair:CryptoKeyPair,
+    wrapped:Uint8Array,
+    opts?:{ info:Uint8Array|string }
+):Promise<CryptoKey> {
+    const keyBytes = await openRawBytes(keypair, wrapped, opts)
+    return importAesKey(keyBytes)
+}
+
+/**
+ * Wrap an AES key to a recipient's public key. `create(...)` calls this
+ * helper with no `aesKey`, so it generates a fresh AES key first.
+ *
+ * @param recipient The recipient's X25519 public key, as a `CryptoKey`,
+ *   `CryptoKeyPair` (its `.publicKey` is used), 32 raw bytes (`Uint8Array`),
+ *   or `{ publicKey:string, encoding? }` (encoding defaults to `base64url`).
+ * @param aesKey Optional key to seal, as either an AES-GCM `CryptoKey` or its
+ *   raw bytes (`Uint8Array`, 16 or 32 bytes). Omit to generate a fresh
+ *   extractable key of `opts.size` bits. A supplied `CryptoKey` MUST be
+ *   extractable (its raw bytes are sealed).
+ * @param opts `size` (128/256, default 256; ignored when `aesKey` is
+ *   supplied) and `info` (bound into the HPKE key schedule; default empty).
+ * @returns { wrapped:Uint8Array, key:CryptoKey } The wrapped envelope bytes
+ *   and a usable AES-GCM `CryptoKey`.
+ */
+async function encryptKey (
+    recipient:RecipientKey,
+    aesKey?:CryptoKey|Uint8Array|null,
+    opts?:{
+        // Size of the GENERATED AES key. Ignored when an `aesKey` is supplied.
+        size?:128|256
+        // HPKE `info`: bound into the key schedule; must match on seal + open.
+        info?:Uint8Array|string
+    }
+):Promise<{ wrapped:Uint8Array; key:CryptoKey }> {
+    const info = normalizeInfo(opts?.info)
+
+    let keyBytes:Uint8Array
+    if (aesKey instanceof Uint8Array) {
+        validateRawKeyBytes(aesKey)
+        keyBytes = aesKey
+    } else if (aesKey) {  // if given a CryptoKey
+        keyBytes = await exportAesKeyBytes(aesKey)
+        validateRawKeyBytes(keyBytes)
+    } else {  // generate a key
+        const keysize = opts?.size ?? 256
+        validateKeysize(keysize)
+        keyBytes = globalThis.crypto.getRandomValues(
+            new Uint8Array(keysize / 8)
+        )
+    }
+
+    const publicKey = await resolveRecipientPublicKey(recipient)
+    const { sharedSecret, enc } = await encap(publicKey)
+    const { key, baseNonce } = await keySchedule(sharedSecret, info)
+    const ciphertext = await aeadSeal(key, baseNonce, keyBytes)
+    const wrapped = concat(enc, ciphertext)
+    const aesGcmKey = await importAesKey(keyBytes)
+
+    return { wrapped, key: aesGcmKey }
 }
