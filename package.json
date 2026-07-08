@@ -43,9 +43,9 @@
   },
   "devDependencies": {
     "@substrate-system/debug": "^0.9.64",
-    "@substrate-system/keys": "^0.2.41",
-    "@substrate-system/tapout": "^0.0.38",
-    "@substrate-system/tapzero": "^0.10.15",
+    "@substrate-system/keys": "^0.2.43",
+    "@substrate-system/tapout": "^0.0.40",
+    "@substrate-system/tapzero": "^0.10.16",
     "auto-changelog": "^2.4.0",
     "esbuild": "^0.28.1",
     "eslint": "^10.6.0",
@@ -53,7 +53,7 @@
     "newneostandard": "^0.14.1",
     "typedoc": "^0.28.9",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.62.0"
+    "typescript-eslint": "^8.63.0"
   },
   "main": "dist/index.js",
   "types": "./dist/index.d.ts",
