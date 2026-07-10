@@ -29,7 +29,7 @@ the plaintext is.
 <!-- toc -->
 
 - [Install](#install)
-- [Example](#example)
+- [Examples](#examples)
   * [Key Wrapping](#key-wrapping)
   * [Hybrid Encryption](#hybrid-encryption)
     + [Encrypt / Decrypt](#encrypt--decrypt)
