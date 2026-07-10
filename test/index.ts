@@ -588,10 +588,24 @@ test('encrypt with a raw Uint8Array AES key', async t => {
 
 test('encrypt/decrypt round-trip with 128-bit key', async t => {
     const kp = await genKeypair()
-    const envelope = await encrypt(kp, 'small key', null, { keysize: 128 })
+    const envelope = await encrypt(kp, 'small key', null, { size: 128 })
     const plaintext = await decrypt.asString(kp, envelope)
     t.equal(plaintext, 'small key', '128-bit wrapped key round-trips')
 })
+
+test('encrypt honors the size option for the wrapped-key length',
+    async t => {
+        const kp = await genKeypair()
+        const envelope = await encrypt(kp, 'small key', null, { size: 128 })
+        const wrappedLen = (envelope[0] << 8) | envelope[1]
+        t.equal(
+            wrappedLen,
+            64,
+            'size:128 -> 64-byte wrapped-key prefix (32-byte enc + ' +
+            '16-byte key + 16-byte AEAD tag)'
+        )
+    }
+)
 
 test('encrypt/decrypt honors matching info, rejects mismatch',
     async t => {

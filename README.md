@@ -14,6 +14,16 @@ Hybrid Public Key Encryption
 
 1 dependency -- `uint8arrays`.
 
+On every `create`/`seal` call, we generate a fresh ephemeral X25519 keypair,
+do Diffie-Hellman against the recipient public key, and the key schedule derives
+an AES-256-GCM key from that shared secret.
+
+That DH-derived key is the wrapping key. The AES key the API hands back is a
+second, independently random key, and the wrapping key encrypts its raw
+bytes. *Key wrapping* here just means "HPKE seal where the plaintext
+happens to be 16 or 32 bytes of key material." The RFC doesn't care what
+the plaintext is.
+
 <details><summary><h2>Contents</h2></summary>
 
 <!-- toc -->
@@ -45,13 +55,13 @@ Hybrid Public Key Encryption
 npm i -S simple-hpke
 ```
 
-## Example
+## Examples
 
-Wrap an AES key, or encrypt a message.
+Create an AES key, or encrypt a message.
 
 ### Key Wrapping
 
-Encrypt an AES key to yourself, then recover it later.
+Encrypt an AES key, then recover it later.
 
 ```ts
 import { create, seal, open } from 'simple-hpke'
@@ -61,7 +71,7 @@ import { create, seal, open } from 'simple-hpke'
 // HPKE only needs `deriveBits`.
 const keypair = await crypto.subtle.generateKey(
     { name: 'X25519' },
-    false,  // extractable
+    false,  // not extractable
     ['deriveBits']
 )
 
@@ -71,10 +81,9 @@ const { enc, key } = await create(keypair)
 //
 // Or wrap an existing AES key. The supplied AES key must be extractable.
 //
-
 const aesKey = await crypto.subtle.generateKey(
     { name: 'AES-GCM', length: 256 },
-    true,  // extractable
+    true,  // not extractable
     ['encrypt', 'decrypt']
 )
 
@@ -179,7 +188,7 @@ import { encrypt, decrypt } from 'simple-hpke'
 // need a public key for the recipient
 const recipient = await crypto.subtle.generateKey(
     { name: 'X25519' },
-    false,  // extractable
+    false,  // not extractable
     ['deriveBits']
 )
 
@@ -249,7 +258,7 @@ async function encrypt (
     message:Uint8Array|string,
     aesKey?:CryptoKey|Uint8Array|null,
     opts?:{
-        keysize?:128|256
+        size?:128|256
         info?:Uint8Array|string
     }
 ):Promise<Uint8Array>

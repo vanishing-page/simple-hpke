@@ -87,13 +87,13 @@ export async function aeadOpen (
  * @param message Plaintext to encrypt. A `string` is UTF-8 encoded.
  * @param aesKey Optional key, as either an AES-GCM `CryptoKey` or its raw
  *   bytes (`Uint8Array`, 16 or 32 bytes). Omit to generate a fresh key of
- *   `opts.keysize` bits. A supplied `CryptoKey` MUST be extractable. Each
+ *   `opts.size` bits. A supplied `CryptoKey` MUST be extractable. Each
  *   call picks a fresh random 96-bit IV for the message ciphertext, so
  *   reusing the same `aesKey` across many calls carries the standard
  *   birthday bound for random nonces (collision risk becomes
  *   non-negligible around 2^32 messages under one key, NIST SP 800-38D) --
  *   prefer a fresh key per call (the default) over reusing one at scale.
- * @param opts `keysize` (128/256, default 256; ignored when `aesKey` is
+ * @param opts `size` (128/256, default 256; ignored when `aesKey` is
  *   supplied) and `info` (bound into the HPKE key schedule).
  * @returns The concatenated envelope bytes.
  *
@@ -104,7 +104,7 @@ export async function encryptBytes (
     message:Uint8Array|string,
     aesKey?:CryptoKey|Uint8Array|null,
     opts?:{
-        keysize?:128|256
+        size?:128|256
         info?:Uint8Array|string
     }
 ):Promise<Uint8Array> {
@@ -147,13 +147,13 @@ export async function encryptBytes (
  * @param message Plaintext to encrypt. A `string` is UTF-8 encoded.
  * @param aesKey Optional key, as either an AES-GCM `CryptoKey` or its raw
  *   bytes (`Uint8Array`, 16 or 32 bytes). Omit to generate a fresh key of
- *   `opts.keysize` bits. A supplied `CryptoKey` MUST be extractable. Each
+ *   `opts.size` bits. A supplied `CryptoKey` MUST be extractable. Each
  *   call picks a fresh random 96-bit IV for the message ciphertext, so
  *   reusing the same `aesKey` across many calls carries the standard
  *   birthday bound for random nonces (collision risk becomes
  *   non-negligible around 2^32 messages under one key, NIST SP 800-38D) --
  *   prefer a fresh key per call (the default) over reusing one at scale.
- * @param opts `keysize` (128/256, default 256; ignored when `aesKey` is
+ * @param opts `size` (128/256, default 256; ignored when `aesKey` is
  *   supplied), `info` (bound into the HPKE key schedule), and `encoding`
  *   (the string encoding of the returned envelope; default `base64url`).
  * @returns The encoded envelope string.
@@ -163,7 +163,7 @@ export async function encryptToString (
     message:Uint8Array|string,
     aesKey?:CryptoKey|Uint8Array|null,
     opts?:{
-        keysize?:128|256
+        size?:128|256
         info?:Uint8Array|string
         encoding?:SupportedEncodings
     }
