@@ -14,7 +14,7 @@ Hybrid Public Key Encryption
 
 1 dependency -- `uint8arrays`.
 
-On every `create`/`seal` call, we generate a fresh ephemeral X25519 keypair,
+On every `create`/`encrypt` call, we generate a fresh ephemeral X25519 keypair,
 do Diffie-Hellman against the recipient public key, and the key schedule derives
 an AES-256-GCM key from that shared secret.
 
@@ -64,7 +64,7 @@ Create an AES key, or encrypt a message.
 Encrypt an AES key, then recover it later.
 
 ```ts
-import { create, seal, open } from 'simple-hpke'
+import { create, encryptKey, open } from 'simple-hpke'
 
 // An X25519 keypair. (asymmetric keypair).
 // The private key can be non-extractable.
@@ -76,7 +76,9 @@ const keypair = await crypto.subtle.generateKey(
 )
 
 // Create a new AES key and encrypt it to your public key.
-const { enc, key } = await create(keypair)
+// `key` is the unencrypted new AES key
+// `enc` is the AES key encrypted to the given public key
+const { enc, key } = await create(keypair.publicKey)  // or a buffer or string
 
 //
 // Or wrap an existing AES key. The supplied AES key must be extractable.
@@ -88,12 +90,12 @@ const aesKey = await crypto.subtle.generateKey(
 )
 
 // Wrap the existing key.
-const { enc: sealedKey } = await seal(keypair, aesKey)
+const { enc: wrappedKey } = await encryptKey(keypair, aesKey)
 
 // or pass in just a public key
 
 // Later, recover the same key with your private key.
-const recoveredKey = await open(keypair, sealedKey)
+const recoveredKey = await open(keypair, wrappedKey)
 
 // `recoveredKey` is equal to `aesKey`
 ```
@@ -105,7 +107,7 @@ const recoveredKey = await open(keypair, sealedKey)
 ### Hybrid Encryption
 
 Encrypt a message with AES-GCM, then encrypt the AES key to a given
-public key. The wrapped key is concattenated with the cipher text,
+public key. The encrypted key is concattenated with the cipher text,
 along with the IV. The recipient uses their private key to open the AES key and
 decrypt the message.
 
@@ -160,7 +162,7 @@ new TextDecoder().decode(plaintext)  // => 'attack at dawn'
 So that was a lot of code to encrypt and decrypt a message...
 This package exposes functions `encrypt` and `decrypt` that do the same thing.
 
-`encrypt` seals an AES key to the recipient, encrypts the message under
+`encrypt` wraps an AES key to the recipient, encrypts the message under
 that key, and returns a single envelope:
 `wrappedLen + wrappedKey + iv + ciphertext`
 (a 2-byte length prefix, the wrapped key, the 12-byte AES-GCM IV, and the
@@ -339,7 +341,7 @@ This exposes ESM and common JS via
 
 ### ESM
 ```js
-import { create, seal, open, encrypt, decrypt } from 'simple-hpke'
+import { create, encryptKey, open, encrypt, decrypt } from 'simple-hpke'
 ```
 
 ### Common JS

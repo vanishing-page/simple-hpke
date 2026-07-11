@@ -3,7 +3,7 @@ import {
     fromString,
     type SupportedEncodings
 } from 'uint8arrays'
-import { create, seal } from './index.js'
+import { encryptKey } from './index.js'
 import {
     WRAPPED_LEN_PREFIX,
     NN,
@@ -73,7 +73,7 @@ export async function aeadOpen (
 }
 
 /**
- * Seal a fresh (or supplied) AES key to `recipient`, then AES-GCM encrypt a
+ * Wrap a fresh (or supplied) AES key to `recipient`, then AES-GCM encrypt a
  * message under it. The wrapped key, IV, and ciphertext are concatenated
  * into a single self-describing envelope.
  *
@@ -112,19 +112,8 @@ export async function encryptBytes (
         new TextEncoder().encode(message) :
         message
 
-    let enc:Uint8Array<ArrayBufferLike>
-    let key:CryptoKey
-    if (!aesKey) {
-        const keys = await create(recipient, opts)
-        enc = keys.enc
-        key = keys.key
-    } else {
-        const keys = await seal(recipient, aesKey, opts)
-        enc = keys.enc
-        key = keys.key
-    }
+    const { enc, key } = await encryptKey(recipient, aesKey, opts)
 
-    // const { enc, key } = await seal(recipient, aesKey, opts)
     const iv = globalThis.crypto.getRandomValues(new Uint8Array(NN))
     const ct = new Uint8Array(await subtle.encrypt(
         { name: 'AES-GCM', iv: iv as BufferSource },

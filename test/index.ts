@@ -1,7 +1,7 @@
 import { test } from '@substrate-system/tapzero'
 import { toString, fromString } from 'uint8arrays'
 import { EccKeys } from '@substrate-system/keys/ecc'
-import { create, seal, open, encrypt, decrypt } from '../src/index.js'
+import { create, encryptKey, open, encrypt, decrypt } from '../src/index.js'
 
 const subtle = globalThis.crypto.subtle
 
@@ -63,7 +63,7 @@ test('create and open keys are cross-usable', async t => {
     t.ok(matches2, 'recovered→key round-trip works')
 })
 
-test('seal/open with caller-supplied key', async t => {
+test('encryptKey/open with caller-supplied key', async t => {
     const kp = await genKeypair()
     const myKey = await subtle.generateKey(
         { name: 'AES-GCM', length: 256 },
@@ -71,7 +71,7 @@ test('seal/open with caller-supplied key', async t => {
         ['encrypt', 'decrypt']
     )
 
-    const { enc } = await seal(kp, myKey)
+    const { enc } = await encryptKey(kp, myKey)
     const recovered = await open(kp, enc)
 
     const myRaw = await raw(myKey)
@@ -83,24 +83,24 @@ test('seal/open with caller-supplied key', async t => {
     )
 })
 
-test('seal/open with raw Uint8Array key', async t => {
+test('encryptKey/open with raw Uint8Array key', async t => {
     const kp = await genKeypair()
     const rawKey = globalThis.crypto.getRandomValues(new Uint8Array(32))
 
-    const { enc } = await seal(kp, rawKey)
+    const { enc } = await encryptKey(kp, rawKey)
     const recovered = await open(kp, enc)
 
     t.ok(
         bytesEqual(rawKey, await raw(recovered)),
-        'raw key bytes round-trip through seal/open'
+        'raw key bytes round-trip through encryptKey/open'
     )
 })
 
-test('seal with 16-byte raw key round-trips', async t => {
+test('encryptKey with 16-byte raw key round-trips', async t => {
     const kp = await genKeypair()
     const rawKey = globalThis.crypto.getRandomValues(new Uint8Array(16))
 
-    const { enc } = await seal(kp, rawKey)
+    const { enc } = await encryptKey(kp, rawKey)
     const recovered = await open(kp, enc)
 
     t.ok(
@@ -116,13 +116,13 @@ test('raw key of invalid length throws', async t => {
     let threw = false
     let errorMessage = ''
     try {
-        await seal(kp, badKey)
+        await encryptKey(kp, badKey)
     } catch (e) {
         threw = true
         if (e instanceof Error) errorMessage = e.message
     }
 
-    t.ok(threw, '24-byte raw key throws during seal')
+    t.ok(threw, '24-byte raw key throws during encryptKey')
     t.ok(
         /invalid aesKey length/.test(errorMessage),
         'error message names the invalid length (not a WebCrypto error)'
@@ -144,13 +144,13 @@ test('CryptoKey exporting to invalid-length bytes throws', async t => {
     let threw = false
     let errorMessage = ''
     try {
-        await seal(kp, badKey as unknown as CryptoKey)
+        await encryptKey(kp, badKey as unknown as CryptoKey)
     } catch (e) {
         threw = true
         if (e instanceof Error) errorMessage = e.message
     }
 
-    t.ok(threw, '24-byte CryptoKey throws during seal')
+    t.ok(threw, '24-byte CryptoKey throws during encryptKey')
     t.ok(
         /invalid aesKey length/.test(errorMessage),
         'error message names the invalid length (not a WebCrypto error)'
@@ -177,7 +177,7 @@ test('open.raw returns raw bytes for 32-byte key', async t => {
     const kp = await genKeypair()
     const originalKey = globalThis.crypto.getRandomValues(new Uint8Array(32))
 
-    const { enc } = await seal(kp, originalKey)
+    const { enc } = await encryptKey(kp, originalKey)
     const recoveredBytes = await open.raw(kp, enc)
 
     t.ok(
@@ -190,7 +190,7 @@ test('open.raw returns raw bytes for 16-byte key', async t => {
     const kp = await genKeypair()
     const originalKey = globalThis.crypto.getRandomValues(new Uint8Array(16))
 
-    const { enc } = await seal(kp, originalKey)
+    const { enc } = await encryptKey(kp, originalKey)
     const recoveredBytes = await open.raw(kp, enc)
 
     t.ok(
@@ -271,7 +271,7 @@ test('open.raw with mismatched info throws',
     async t => {
         const kp = await genKeypair()
 
-        // Seal with 'abc'
+        // Create with 'abc'
         const { enc } = await create(kp, { info: 'abc' })
 
         // Attempt open.raw with mismatched 'xyz'
@@ -301,7 +301,7 @@ test('non-extractable key throws', async t => {
     let threw = false
     let errorMessage = ''
     try {
-        await seal(kp, nonExtractable)
+        await encryptKey(kp, nonExtractable)
     } catch (e) {
         threw = true
         if (e instanceof Error) {
@@ -309,7 +309,7 @@ test('non-extractable key throws', async t => {
         }
     }
 
-    t.ok(threw, 'non-extractable key throws during seal')
+    t.ok(threw, 'non-extractable key throws during encryptKey')
     t.ok(
         /raw bytes are what get sealed/.test(errorMessage),
         'error message contains guard message (not WebCrypto error)'
@@ -322,7 +322,7 @@ test('ephemeral encap keypair is generated non-extractable', async t => {
     let ephExtractable:boolean|null = null
 
     // Spy on the real WebCrypto call (still delegates to it) to observe
-    // the `extractable` flag `seal` passes when generating the ephemeral
+    // the `extractable` flag `create` passes when generating the ephemeral
     // X25519 keypair inside `encap`. That keypair never leaves the
     // library, so this is the only way to check the flag from outside.
     subtle.generateKey = (async (
@@ -399,7 +399,7 @@ test('invalid size throws', async t => {
     t.ok(threw, 'invalid size throws during create')
 })
 
-test('sealing the same key twice yields different envelopes',
+test('encrypting the same key twice yields different envelopes',
     async t => {
         const kp = await genKeypair()
         const myKey = await subtle.generateKey(
@@ -408,11 +408,12 @@ test('sealing the same key twice yields different envelopes',
             ['encrypt', 'decrypt']
         )
 
-        const a = await seal(kp, myKey)
-        const b = await seal(kp, myKey)
+        const a = await encryptKey(kp, myKey)
+        const b = await encryptKey(kp, myKey)
 
         const same = bytesEqual(a.enc, b.enc)
-        t.ok(!same, 'two seals of same key produce different envelopes')
+        t.ok(!same, 'two encryptKey calls for the same key produce ' +
+            'different envelopes')
     }
 )
 
@@ -454,7 +455,7 @@ test('EccKeys getters assemble working keypair',
             ['encrypt', 'decrypt']
         )
 
-        const { enc } = await seal(kp, myKey)
+        const { enc } = await encryptKey(kp, myKey)
         const recovered = await open(kp, enc)
 
         const myRaw = await raw(myKey)
@@ -462,7 +463,7 @@ test('EccKeys getters assemble working keypair',
 
         t.ok(
             bytesEqual(myRaw, recoveredRaw),
-            'EccKeys getters form valid keypair for seal/open'
+            'EccKeys getters form valid keypair for encryptKey/open'
         )
     }
 )
@@ -506,7 +507,7 @@ test('mismatched info causes rejection, matching succeeds',
     async t => {
         const kp = await genKeypair()
 
-        // Seal with 'context-a'
+        // Create with 'context-a'
         const { enc, key } = await create(kp, { info: 'context-a' })
 
         // Attempt open with mismatched 'context-b'
@@ -958,9 +959,9 @@ test('open with a non-X25519 private key throws a clear error',
 // (@hpke/core, DHKEM(X25519, HKDF-SHA256) + HKDF-SHA256 + AES-256-GCM,
 // base mode): a fixed X25519 keypair sealing a fixed 32-byte plaintext.
 // Every other test here is a round-trip against this library's own
-// seal/open, which cannot catch conformance drift (a wrong label, suite
-// ID, or kem_context ordering would pass every round-trip test while
-// silently breaking wire compatibility with every other HPKE
+// encryptKey/open, which cannot catch conformance drift (a wrong label,
+// suite ID, or kem_context ordering would pass every round-trip test
+// while silently breaking wire compatibility with every other HPKE
 // implementation). This test would catch that.
 const FIXTURE_PRIVATE_KEY_HEX =
     '68a48becb31d1f341c665c50f99662a2a72a1127327c162a1931de6a4d096b46'

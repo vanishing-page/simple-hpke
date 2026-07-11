@@ -44,42 +44,24 @@ export async function create (
     opts?:{
         // Size of the GENERATED AES key. Ignored when an `aesKey` is supplied.
         size?:128|256
-        // HPKE `info`: bound into the key schedule; must match on seal + open.
+        // HPKE `info`: bound into the key schedule; must match on open.
         info?:Uint8Array|string
     }
 ):Promise<{ enc:Uint8Array<ArrayBufferLike>, key:CryptoKey }> {
-    const { wrapped, key } = await encryptKey(recipient, null, opts)
-    return { enc: wrapped, key }
+    const { enc, key } = await encryptKey(recipient, null, opts)
+    return { enc, key }
 }
 
 /**
- * Encrypt the given AES key to the given public key.
- *
- * @returns {{ enc, key }} The wrapped envelope bytes and a usable AES-GCM
- *   key with the same raw bytes as `aesKey`.
- */
-export async function seal (
-    recipient:RecipientKey,
-    aesKey:CryptoKey|Uint8Array|null,
-    opts?:{
-        // HPKE `info`: bound into the key schedule; must match on seal + open.
-        info?:Uint8Array|string
-    }
-):Promise<{ enc:Uint8Array<ArrayBufferLike>, key:CryptoKey }> {
-    const { wrapped, key } = await encryptKey(recipient, aesKey, opts)
-    return { enc: wrapped, key }
-}
-
-/**
- * Recover the AES key wrapped by `create` or `seal`. Call `open(...)` for a
- * usable AES-GCM `CryptoKey`, or `open.raw(...)` for the raw key bytes.
+ * Recover the AES key wrapped by `create` or `encryptKey`. Call `open(...)`
+ * for a usable AES-GCM `CryptoKey`, or `open.raw(...)` for the raw key bytes.
  */
 export const open = Object.assign(openBytes, {
     raw: openRawBytes
 })
 
 /**
- * Seal an AES key to `recipient` and AES-GCM encrypt a message under it.
+ * Wrap an AES key to `recipient` and AES-GCM encrypt a message under it.
  * Call `encrypt(...)` for the raw envelope bytes, or `encrypt.asString(...)`
  * for the same envelope as an encoded string.
  */
@@ -311,9 +293,9 @@ async function keySchedule (
  * Like `open`, but returns the recovered key as raw bytes instead of
  * importing it as an AES-GCM `CryptoKey`. Exposed as `open.raw`.
  *
- * @param keypair The same X25519 `CryptoKeyPair` used to create or seal.
- * @param wrapped The `enc` bytes returned by `create` or `seal`.
- * @param opts `info` — must match the value passed to `create` or `seal`.
+ * @param keypair The same X25519 `CryptoKeyPair` used to create or encryptKey.
+ * @param wrapped The `enc` bytes returned by `create` or `encryptKey`.
+ * @param opts `info` — must match the value passed to `create` or `encryptKey`.
  * @returns The recovered key bytes (16 or 32 bytes, matching whatever
  *   was wrapped).
  */
@@ -336,11 +318,11 @@ async function openRawBytes (
 }
 
 /**
- * Recover an AES key that was wrapped with `create` or `seal`.
+ * Recover an AES key that was wrapped with `create` or `encryptKey`.
  *
- * @param keypair The same X25519 `CryptoKeyPair` used to create or seal.
- * @param wrapped The `enc` bytes returned by `create` or `seal`.
- * @param opts `info` — must match the value passed to `create` or `seal`.
+ * @param keypair The same X25519 `CryptoKeyPair` used to create or encryptKey.
+ * @param wrapped The `enc` bytes returned by `create` or `encryptKey`.
+ * @param opts `info` — must match the value passed to `create` or `encryptKey`.
  * @returns The recovered AES-GCM `CryptoKey` (extractable).
  */
 async function openBytes (
@@ -359,25 +341,25 @@ async function openBytes (
  * @param recipient The recipient's X25519 public key, as a `CryptoKey`,
  *   `CryptoKeyPair` (its `.publicKey` is used), 32 raw bytes (`Uint8Array`),
  *   or `{ publicKey:string, encoding? }` (encoding defaults to `base64url`).
- * @param aesKey Optional key to seal, as either an AES-GCM `CryptoKey` or its
+ * @param aesKey Optional key to wrap, as either an AES-GCM `CryptoKey` or its
  *   raw bytes (`Uint8Array`, 16 or 32 bytes). Omit to generate a fresh
  *   extractable key of `opts.size` bits. A supplied `CryptoKey` MUST be
- *   extractable (its raw bytes are sealed).
+ *   extractable (its raw bytes are wrapped).
  * @param opts `size` (128/256, default 256; ignored when `aesKey` is
  *   supplied) and `info` (bound into the HPKE key schedule; default empty).
- * @returns { wrapped:Uint8Array, key:CryptoKey } The wrapped envelope bytes
+ * @returns { enc:Uint8Array, key:CryptoKey } The wrapped envelope bytes
  *   and a usable AES-GCM `CryptoKey`.
  */
-async function encryptKey (
+export async function encryptKey (
     recipient:RecipientKey,
     aesKey?:CryptoKey|Uint8Array|null,
     opts?:{
         // Size of the GENERATED AES key. Ignored when an `aesKey` is supplied.
         size?:128|256
-        // HPKE `info`: bound into the key schedule; must match on seal + open.
+        // HPKE `info`: bound into the key schedule; must match on open.
         info?:Uint8Array|string
     }
-):Promise<{ wrapped:Uint8Array; key:CryptoKey }> {
+):Promise<{ enc:Uint8Array; key:CryptoKey }> {
     const info = normalizeInfo(opts?.info)
 
     let keyBytes:Uint8Array
@@ -402,5 +384,5 @@ async function encryptKey (
     const wrapped = concat(enc, ciphertext)
     const aesGcmKey = await importAesKey(keyBytes)
 
-    return { wrapped, key: aesGcmKey }
+    return { enc: wrapped, key: aesGcmKey }
 }
