@@ -38,6 +38,9 @@ the plaintext is.
       - [`decrypt`](#decrypt)
       - [`decrypt.asString`](#decryptasstring)
       - [`decrypt.fromString`](#decryptfromstring)
+- [Extractable keys](#extractable-keys)
+- [`keyId`](#keyid)
+- [Errors](#errors)
 - [Modules](#modules)
   * [ESM](#esm)
   * [Common JS](#common-js)
@@ -77,20 +80,24 @@ const keypair = await crypto.subtle.generateKey(
 
 // Create a new AES key and encrypt it to your public key.
 // `key` is the unencrypted new AES key
-// `enc` is the AES key encrypted to the given public key
-const { enc, key } = await create(keypair.publicKey)  // or a buffer or string
+// `wrapped` is the AES key encrypted to the given public key
+const { wrapped, key } = await create(keypair.publicKey)  // or bytes or string
+
+// `key` is non-extractable by default. It still encrypts and decrypts;
+// it just cannot be exported. Pass `{ extractable: true }` if you need
+// the raw bytes. See [Extractable keys](#extractable-keys).
 
 //
 // Or wrap an existing AES key. The supplied AES key must be extractable.
 //
 const aesKey = await crypto.subtle.generateKey(
     { name: 'AES-GCM', length: 256 },
-    true,  // not extractable
+    true,  // extractable -- its raw bytes are what get sealed
     ['encrypt', 'decrypt']
 )
 
 // Wrap the existing key.
-const { enc: wrappedKey } = await encryptKey(keypair, aesKey)
+const { wrapped: wrappedKey } = await encryptKey(keypair, aesKey)
 
 // or pass in just a public key
 
@@ -121,7 +128,7 @@ const recipient = await crypto.subtle.generateKey(
 )
 
 // Create a fresh AES-GCM key, and encrypt a message with it.
-const { enc, key } = await create(recipient)
+const { wrapped, key } = await create(recipient)
 const iv = crypto.getRandomValues(new Uint8Array(12))
 const ciphertextBuffer = await crypto.subtle.encrypt(
     { name: 'AES-GCM', iv },
@@ -129,25 +136,28 @@ const ciphertextBuffer = await crypto.subtle.encrypt(
     new TextEncoder().encode('attack at dawn')
 )
 
-// Send `enc`, `iv`, and `ciphertext` together. `create(...)` defaults to a
-// 256-bit AES key, so `enc.length` is 80 bytes in this example.
+// Send `wrapped`, `iv`, and `ciphertext` together. `create(...)` defaults
+// to a 256-bit AES key, so `wrapped.length` is 80 bytes in this example.
 //
-// If your protocol allows different wrapped-key sizes, prefix `enc.length`
-// (or otherwise transmit it) so the recipient can split the payload safely.
+// If your protocol allows different wrapped-key sizes, prefix
+// `wrapped.length` (or otherwise transmit it) so the recipient can split
+// the payload safely.
 const ciphertext = new Uint8Array(ciphertextBuffer)
-const encLength = enc.length
-const message = new Uint8Array(encLength + iv.length + ciphertext.length)
-message.set(enc, 0)
-message.set(iv, encLength)
-message.set(ciphertext, encLength + iv.length)
+const wrappedLength = wrapped.length
+const message = new Uint8Array(
+    wrappedLength + iv.length + ciphertext.length
+)
+message.set(wrapped, 0)
+message.set(iv, wrappedLength)
+message.set(ciphertext, wrappedLength + iv.length)
 
 // On the other side, split the payload back into its parts.
-const enc2 = message.subarray(0, encLength)
-const iv2 = message.subarray(encLength, encLength + 12)
-const ciphertext2 = message.subarray(encLength + 12)
+const wrapped2 = message.subarray(0, wrappedLength)
+const iv2 = message.subarray(wrappedLength, wrappedLength + 12)
+const ciphertext2 = message.subarray(wrappedLength + 12)
 
 // Recover the key, then decrypt the message.
-const recovered = await open(recipient, enc2)
+const recovered = await open(recipient, wrapped2)
 const plaintext = await crypto.subtle.decrypt(
     { name: 'AES-GCM', iv: iv2 },
     recovered,
@@ -334,6 +344,100 @@ decrypt.fromString = async function decryptFromString (
 
 ---------------------------------------------------------------
 
+## Extractable keys
+
+`create`, `encryptKey`, and `open` return a **non-extractable** AES-GCM
+`CryptoKey` by default. It encrypts and decrypts normally; it just cannot
+be exported, so its raw bytes cannot leak out of the runtime.
+
+Opt in when you genuinely need the bytes:
+
+```ts
+const { wrapped, key } = await create(recipient, { extractable: true })
+const bytes = new Uint8Array(await crypto.subtle.exportKey('raw', key))
+
+// same option on the way back out
+const recovered = await open(keypair, wrapped, { extractable: true })
+```
+
+This is separate from the `aesKey` you may pass **in** to `encryptKey` /
+`encrypt`. That one must always be extractable, because its raw bytes are
+what get sealed.
+
+If you only need to tell two keys apart, you do not need the bytes --
+use [`keyId`](#keyid).
+
+## `keyId`
+
+A stable fingerprint for an AES-GCM key, so you can ask "is this the key I
+have?" without holding its bytes.
+
+```ts
+async function keyId (key:CryptoKey):Promise<string>
+```
+
+```ts
+import { create, open, keyId } from 'simple-hpke'
+
+const { wrapped, key } = await create(recipient)
+const id = await keyId(key)     // 43-char base64url string
+
+const recovered = await open(keypair, wrapped)
+await keyId(recovered) === id   // true
+```
+
+It works on a **non-extractable** key -- including one rehydrated from
+IndexedDB -- which is the whole point: the obvious implementation
+(`exportKey('raw')` then SHA-256) would force every key you want to
+identify to be extractable.
+
+The derivation is fixed, and is treated as wire format:
+
+```
+LABEL = utf8("simple-hpke/keyId/v1")
+N     = SHA-256(LABEL)[0..12]        // fixed nonce
+C     = AES-GCM(key, N, LABEL)       // ciphertext || 16-byte tag
+keyId = base64url(SHA-256(LABEL || C))
+```
+
+`key` must be an AES-GCM key with the `encrypt` usage; anything else
+throws [`ERR_INVALID_AES_KEY`](#errors).
+
+## Errors
+
+Every error this package throws is an `HpkeError`: an ordinary `Error`
+with a stable `code`. Branch on the code, not on the message text -- the
+codes are part of the API, the prose is not. Where a WebCrypto failure is
+being wrapped, the original is kept on `cause`.
+
+```ts
+import { decrypt, HpkeError } from 'simple-hpke'
+
+try {
+    await decrypt(keypair, envelope)
+} catch (err) {
+    if (err instanceof HpkeError && err.code === 'ERR_DECRYPT_FAILED') {
+        // wrong keypair, wrong `info`, or a tampered envelope
+    }
+    throw err
+}
+```
+
+| Code | Raised when |
+| --- | --- |
+| `ERR_INVALID_RECIPIENT_KEY` | The recipient is not a usable X25519 public key: wrong length, a private key, the wrong algorithm, or an unrecognized form. |
+| `ERR_INVALID_KEYPAIR` | `keypair.privateKey` is not an X25519 private key. |
+| `ERR_SMALL_ORDER_KEY` | The X25519 shared secret came out all-zero (a small-order public key). Conforming runtimes reject this first. |
+| `ERR_MALFORMED_ENVELOPE` | An `open` / `open.raw` envelope is too short to hold `enc` plus an AEAD tag. |
+| `ERR_MALFORMED_MESSAGE` | A `decrypt` envelope is too short to hold its own declared segments. |
+| `ERR_INVALID_KEYSIZE` | `opts.size` is neither `128` nor `256`. |
+| `ERR_INVALID_AES_KEY` | A supplied `aesKey` is the wrong length or non-extractable, or `keyId` got a key it cannot use. |
+| `ERR_DECRYPT_FAILED` | AES-GCM authentication failed: wrong keypair, wrong `info`, or a tampered ciphertext. |
+
+`HpkeErrorCode` is exported as a type if you want to switch exhaustively.
+
+---------------------------------------------------------------
+
 ## Modules
 
 This exposes ESM and common JS via
@@ -341,7 +445,15 @@ This exposes ESM and common JS via
 
 ### ESM
 ```js
-import { create, encryptKey, open, encrypt, decrypt } from 'simple-hpke'
+import {
+    create,
+    encryptKey,
+    open,
+    encrypt,
+    decrypt,
+    keyId,
+    HpkeError
+} from 'simple-hpke'
 ```
 
 ### Common JS

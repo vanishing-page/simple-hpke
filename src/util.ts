@@ -4,13 +4,16 @@ import {
     type SupportedEncodings
 } from 'uint8arrays'
 import { encryptKey } from './index.js'
+import { HpkeError, type HpkeErrorCode } from './errors.js'
 import {
     WRAPPED_LEN_PREFIX,
     NN,
     NSECRET,
     HPKE_V1,
     ENC_LENGTH,
-    KEM_SUITE_ID
+    KEM_SUITE_ID,
+    KEY_ID_LABEL,
+    KEY_ID_NONCE_LENGTH
 } from './constants.js'
 const subtle = globalThis.crypto.subtle
 
@@ -64,11 +67,24 @@ export async function aeadOpen (
         false,
         ['decrypt']
     )
-    const pt = await subtle.decrypt(
-        { name: 'AES-GCM', iv: nonce as BufferSource },
-        k,
-        ciphertext as BufferSource
-    )
+    let pt:ArrayBuffer
+    try {
+        pt = await subtle.decrypt(
+            { name: 'AES-GCM', iv: nonce as BufferSource },
+            k,
+            ciphertext as BufferSource
+        )
+    } catch (err) {
+        // AES-GCM authentication failed. WebCrypto reports every cause
+        // as the same opaque `OperationError`, so this is deliberately
+        // the one error for all of them.
+        throw new HpkeError(
+            'ERR_DECRYPT_FAILED',
+            'failed to decrypt the wrapped key: wrong keypair, ' +
+            'wrong info, or a tampered envelope',
+            { cause: err }
+        )
+    }
     return new Uint8Array(pt)
 }
 
@@ -112,7 +128,7 @@ export async function encryptBytes (
         new TextEncoder().encode(message) :
         message
 
-    const { enc, key } = await encryptKey(recipient, aesKey, opts)
+    const { wrapped, key } = await encryptKey(recipient, aesKey, opts)
 
     const iv = globalThis.crypto.getRandomValues(new Uint8Array(NN))
     const ct = new Uint8Array(await subtle.encrypt(
@@ -121,11 +137,16 @@ export async function encryptBytes (
         plaintext as BufferSource
     ))
 
-    return concat(i2osp(enc.length, WRAPPED_LEN_PREFIX), enc, iv, ct)
+    return concat(
+        i2osp(wrapped.length, WRAPPED_LEN_PREFIX),
+        wrapped,
+        iv,
+        ct
+    )
 }
 
 /**
- * Like `encrypt`, but encodes the envelope bytes to a string — handy for
+ * Like `encrypt`, but encodes the envelope bytes to a string -- handy for
  * transports that carry text (JSON, URLs, headers). Decode with
  * `fromString(...)` (or any matching decoder) and pass the bytes to
  * `decrypt` / `decrypt.asString`. Exposed as `encrypt.asString`.
@@ -253,7 +274,8 @@ async function exportRawPublic (key:CryptoKey):Promise<Uint8Array> {
 // no secret.
 async function importRawPublic (raw:Uint8Array):Promise<CryptoKey> {
     if (raw.length !== ENC_LENGTH) {
-        throw new Error(
+        throw new HpkeError(
+            'ERR_INVALID_RECIPIENT_KEY',
             `invalid public key length: ${raw.length} bytes ` +
             `(expected ${ENC_LENGTH})`
         )
@@ -281,9 +303,16 @@ export async function resolveRecipientPublicKey (
     // A single public CryptoKey.
     if (recipient instanceof CryptoKey) {
         if (recipient.type !== 'public') {
-            throw new Error('recipient CryptoKey must be a public key')
+            throw new HpkeError(
+                'ERR_INVALID_RECIPIENT_KEY',
+                'recipient CryptoKey must be a public key'
+            )
         }
-        assertX25519Algorithm(recipient, 'recipient CryptoKey')
+        assertX25519Algorithm(
+            recipient,
+            'recipient CryptoKey',
+            'ERR_INVALID_RECIPIENT_KEY'
+        )
         return recipient
     }
 
@@ -298,21 +327,36 @@ export async function resolveRecipientPublicKey (
     const pair = recipient as CryptoKeyPair
     if (pair.publicKey instanceof CryptoKey) {
         if (pair.publicKey.type !== 'public') {
-            throw new Error('recipient keypair publicKey must be a public key')
+            throw new HpkeError(
+                'ERR_INVALID_RECIPIENT_KEY',
+                'recipient keypair publicKey must be a public key'
+            )
         }
-        assertX25519Algorithm(pair.publicKey, 'recipient keypair publicKey')
+        assertX25519Algorithm(
+            pair.publicKey,
+            'recipient keypair publicKey',
+            'ERR_INVALID_RECIPIENT_KEY'
+        )
         return pair.publicKey
     }
 
-    throw new Error('unrecognized recipient key form')
+    throw new HpkeError(
+        'ERR_INVALID_RECIPIENT_KEY',
+        'unrecognized recipient key form'
+    )
 }
 
 // Guards against an easy mistake (e.g. passing an Ed25519 signing key from
 // a library that exposes both): fail with a clear message here rather than
 // an opaque WebCrypto error later inside deriveBits.
-function assertX25519Algorithm (key:CryptoKey, context:string):void {
+function assertX25519Algorithm (
+    key:CryptoKey,
+    context:string,
+    code:HpkeErrorCode
+):void {
     if (key.algorithm.name !== 'X25519') {
-        throw new Error(
+        throw new HpkeError(
+            code,
             `${context} must be an X25519 key (got ${key.algorithm.name})`
         )
     }
@@ -335,7 +379,8 @@ async function dh (
     // output (a small-order public key); conforming runtimes never reach
     // here. Kept as defense-in-depth against a nonconforming runtime.
     if (bytes.every(b => b === 0)) {
-        throw new Error(
+        throw new HpkeError(
+            'ERR_SMALL_ORDER_KEY',
             'X25519 shared secret is all-zero (small-order public key?)'
         )
     }
@@ -390,9 +435,16 @@ export async function decap (
     keypair:CryptoKeyPair
 ):Promise<Uint8Array> {
     if (keypair.privateKey.type !== 'private') {
-        throw new Error('keypair.privateKey must be a private key')
+        throw new HpkeError(
+            'ERR_INVALID_KEYPAIR',
+            'keypair.privateKey must be a private key'
+        )
     }
-    assertX25519Algorithm(keypair.privateKey, 'keypair.privateKey')
+    assertX25519Algorithm(
+        keypair.privateKey,
+        'keypair.privateKey',
+        'ERR_INVALID_KEYPAIR'
+    )
 
     const pkE = await subtle.importKey(
         'raw',
@@ -405,6 +457,79 @@ export async function decap (
     const pkRm = await exportRawPublic(keypair.publicKey)
     const kemContext = concat(enc, pkRm)
     return extractAndExpand(dhBytes, kemContext)
+}
+
+// ----- keyId -----
+
+/**
+ * A stable fingerprint for an AES-GCM key: the same key bytes always give
+ * the same string, and two different keys effectively never collide.
+ *
+ * Derived from the key's *behavior* rather than its bytes, so it works on
+ * a non-extractable key -- including one rehydrated from IndexedDB, and
+ * the keys `create` / `encryptKey` / `open` return by default. The obvious
+ * implementation, `exportKey('raw')` then SHA-256, would force every such
+ * key to be extractable. HKDF is not an option either: WebCrypto cannot
+ * convert an AES-GCM key into an HKDF key, and `deriveBits` only accepts a
+ * key imported under HKDF, which needs the raw bytes a non-extractable key
+ * withholds. AES-GCM as a PRF is the only primitive such a key still
+ * exposes.
+ *
+ * The derivation is fixed forever (see `src/constants.ts`):
+ *
+ * ```
+ * LABEL = utf8("simple-hpke/keyId/v1")
+ * N     = SHA-256(LABEL)[0..12]        // fixed nonce
+ * C     = AES-GCM(key, N, LABEL)       // ciphertext || 16-byte tag
+ * keyId = base64url(SHA-256(LABEL || C))
+ * ```
+ *
+ * @param key An AES-GCM `CryptoKey` with the `encrypt` usage. It does not
+ *   need to be extractable.
+ * @returns The fingerprint: the full 32-byte digest, base64url, unpadded
+ *   (43 characters).
+ * @throws {HpkeError} `ERR_INVALID_AES_KEY` if `key` is not an AES-GCM key
+ *   or cannot encrypt.
+ */
+export async function keyId (key:CryptoKey):Promise<string> {
+    if (key.algorithm.name !== 'AES-GCM') {
+        throw new HpkeError(
+            'ERR_INVALID_AES_KEY',
+            'keyId needs an AES-GCM key ' +
+            `(got ${key.algorithm.name})`
+        )
+    }
+
+    if (!key.usages.includes('encrypt')) {
+        throw new HpkeError(
+            'ERR_INVALID_AES_KEY',
+            "keyId needs a key with the 'encrypt' usage"
+        )
+    }
+
+    const labelHash = new Uint8Array(
+        await subtle.digest('SHA-256', KEY_ID_LABEL as BufferSource)
+    )
+    const nonce = labelHash.slice(0, KEY_ID_NONCE_LENGTH)
+
+    // No AAD. AAD feeds GHASH only and leaves the counter stream
+    // untouched, so "domain separation by AAD" would produce a second
+    // (A, C) pair over an identical keystream under the same (K, N).
+    // That is nonce reuse with extra steps.
+    const ciphertext = new Uint8Array(await subtle.encrypt(
+        { name: 'AES-GCM', iv: nonce as BufferSource },
+        key,
+        KEY_ID_LABEL as BufferSource
+    ))
+
+    // Only the digest is returned. `ciphertext` is a known-plaintext
+    // block of keystream and must never escape.
+    const digest = await subtle.digest(
+        'SHA-256',
+        concat(KEY_ID_LABEL, ciphertext) as BufferSource
+    )
+
+    return toString(new Uint8Array(digest), 'base64url')
 }
 
 // ----- Pure byte helpers  -----

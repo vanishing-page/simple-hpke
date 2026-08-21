@@ -11,7 +11,9 @@ import {
     decap,
     labeledExtract,
     labeledExpand,
+    keyId,
 } from './util'
+import { HpkeError } from './errors'
 import {
     AEAD_TAG_LENGTH,
     ENC_LENGTH,
@@ -21,6 +23,9 @@ import {
     WRAPPED_LEN_PREFIX,
     HPKE_SUITE_ID,
 } from './constants'
+
+export { keyId }
+export { HpkeError, type HpkeErrorCode } from './errors'
 
 // RFC 9180 HPKE cipher suite
 // (DHKEM(X25519, HKDF-SHA256) + HKDF-SHA256 + AES-256-GCM,
@@ -35,8 +40,8 @@ const subtle = globalThis.crypto.subtle
  * Create a new AES key for the given public key.
  *
  * @param recipient Public key for decryptor
- * @param opts `size` and `info`
- * @returns {{ enc, key }} The wrapped envelope bytes and the generated
+ * @param opts `size`, `info`, and `extractable`
+ * @returns {{ wrapped, key }} The wrapped envelope bytes and the generated
  *   AES-GCM key.
  */
 export async function create (
@@ -46,10 +51,12 @@ export async function create (
         size?:128|256
         // HPKE `info`: bound into the key schedule; must match on open.
         info?:Uint8Array|string
+        // Whether the returned AES key can be exported. Default false.
+        extractable?:boolean
     }
-):Promise<{ enc:Uint8Array<ArrayBufferLike>, key:CryptoKey }> {
-    const { enc, key } = await encryptKey(recipient, null, opts)
-    return { enc, key }
+):Promise<{ wrapped:Uint8Array<ArrayBufferLike>, key:CryptoKey }> {
+    const { wrapped, key } = await encryptKey(recipient, null, opts)
+    return { wrapped, key }
 }
 
 /**
@@ -87,7 +94,7 @@ export const decrypt = Object.assign(decryptBytes, {
  *
  * @param keypair The same recipient `CryptoKeyPair` used to `encrypt`.
  * @param message The envelope returned by `encrypt`.
- * @param opts `info` — must match the value passed to `encrypt`.
+ * @param opts `info` -- must match the value passed to `encrypt`.
  * @returns The decrypted plaintext bytes. Use `decrypt.asString` for a string.
  */
 async function decryptBytes (
@@ -96,14 +103,20 @@ async function decryptBytes (
     opts?:{ info?:Uint8Array|string }
 ):Promise<Uint8Array> {
     if (message.byteLength < WRAPPED_LEN_PREFIX) {
-        throw new Error('malformed message: too short')
+        throw new HpkeError(
+            'ERR_MALFORMED_MESSAGE',
+            'malformed message: too short'
+        )
     }
 
     const wrappedLen = (message[0] << 8) | message[1]
     const ivStart = WRAPPED_LEN_PREFIX + wrappedLen
     const ctStart = ivStart + NN
     if (message.byteLength < ctStart + AEAD_TAG_LENGTH) {
-        throw new Error('malformed message: too short')
+        throw new HpkeError(
+            'ERR_MALFORMED_MESSAGE',
+            'malformed message: too short'
+        )
     }
 
     const wrapped = message.slice(WRAPPED_LEN_PREFIX, ivStart)
@@ -116,11 +129,23 @@ async function decryptBytes (
         opts?.info !== undefined ? { info: opts.info } : undefined
     )
     const key = await importAesKeyDecryptOnly(keyBytes)
-    const pt = await subtle.decrypt(
-        { name: 'AES-GCM', iv: iv as BufferSource },
-        key,
-        ciphertext as BufferSource
-    )
+
+    let pt:ArrayBuffer
+    try {
+        pt = await subtle.decrypt(
+            { name: 'AES-GCM', iv: iv as BufferSource },
+            key,
+            ciphertext as BufferSource
+        )
+    } catch (err) {
+        // The wrapped key opened, so the keypair and `info` were right;
+        // the message body itself failed AES-GCM authentication.
+        throw new HpkeError(
+            'ERR_DECRYPT_FAILED',
+            'failed to decrypt the message: tampered ciphertext',
+            { cause: err }
+        )
+    }
 
     return new Uint8Array(pt)
 }
@@ -131,7 +156,7 @@ async function decryptBytes (
  *
  * @param keypair The same recipient `CryptoKeyPair` used to `encrypt`.
  * @param message The envelope returned by `encrypt`.
- * @param opts `info` — must match the value passed to `encrypt`.
+ * @param opts `info` -- must match the value passed to `encrypt`.
  * @returns The decrypted plaintext as a string.
  */
 async function decryptToString (
@@ -186,7 +211,8 @@ async function decryptFromString (
 
 function validateKeysize (keysize:number):void {
     if (keysize !== 128 && keysize !== 256) {
-        throw new Error(
+        throw new HpkeError(
+            'ERR_INVALID_KEYSIZE',
             `invalid keysize: ${keysize} (expected 128 or 256)`
         )
     }
@@ -197,7 +223,8 @@ function validateKeysize (keysize:number):void {
 // letting WebCrypto silently accept a 24-byte key later).
 function validateRawKeyBytes (raw:Uint8Array):void {
     if (raw.length !== 16 && raw.length !== 32) {
-        throw new Error(
+        throw new HpkeError(
+            'ERR_INVALID_AES_KEY',
             `invalid aesKey length: ${raw.length} bytes ` +
             '(expected 16 or 32)'
         )
@@ -212,27 +239,34 @@ function normalizeInfo (info?:Uint8Array|string):Uint8Array {
 
 async function exportAesKeyBytes (key:CryptoKey):Promise<Uint8Array> {
     if (!key.extractable) {
-        throw new Error(
+        throw new HpkeError(
+            'ERR_INVALID_AES_KEY',
             'aesKey must be extractable: its raw bytes are what get sealed'
         )
     }
     return new Uint8Array(await subtle.exportKey('raw', key))
 }
 
-async function importAesKey (raw:Uint8Array):Promise<CryptoKey> {
+// `extractable` defaults to false at every call site: a key that never
+// needs to leave the runtime should not be exportable, and `keyId` gives
+// callers a fingerprint without the bytes. Callers who really do need the
+// raw bytes opt in with `{ extractable: true }`.
+async function importAesKey (
+    raw:Uint8Array,
+    extractable:boolean
+):Promise<CryptoKey> {
     return subtle.importKey(
         'raw',
         raw as BufferSource,
         { name: 'AES-GCM' },
-        true,
+        extractable,
         ['encrypt', 'decrypt']
     )
 }
 
 // Used by `decryptBytes` instead of `importAesKey`: the message key never
-// leaves the library there, so it can be imported non-extractable and
-// decrypt-only rather than the extractable, both-usages key `open` returns
-// for general use.
+// leaves the library there, so it is imported decrypt-only rather than
+// with the both-usages key `open` returns for general use.
 async function importAesKeyDecryptOnly (raw:Uint8Array):Promise<CryptoKey> {
     return subtle.importKey(
         'raw',
@@ -294,18 +328,22 @@ async function keySchedule (
  * importing it as an AES-GCM `CryptoKey`. Exposed as `open.raw`.
  *
  * @param keypair The same X25519 `CryptoKeyPair` used to create or encryptKey.
- * @param wrapped The `enc` bytes returned by `create` or `encryptKey`.
- * @param opts `info` — must match the value passed to `create` or `encryptKey`.
+ * @param wrapped The `wrapped` bytes returned by `create` or `encryptKey`.
+ * @param opts `info` -- must match the value passed to `create` or
+ *   `encryptKey`.
  * @returns The recovered key bytes (16 or 32 bytes, matching whatever
  *   was wrapped).
  */
 async function openRawBytes (
     keypair:CryptoKeyPair,
     wrapped:Uint8Array,
-    opts?:{ info:Uint8Array|string }
+    opts?:{ info?:Uint8Array|string }
 ):Promise<Uint8Array> {
     if (wrapped.byteLength < ENC_LENGTH + AEAD_TAG_LENGTH) {
-        throw new Error('malformed envelope: too short')
+        throw new HpkeError(
+            'ERR_MALFORMED_ENVELOPE',
+            'malformed envelope: too short'
+        )
     }
 
     const info = normalizeInfo(opts?.info)
@@ -321,17 +359,19 @@ async function openRawBytes (
  * Recover an AES key that was wrapped with `create` or `encryptKey`.
  *
  * @param keypair The same X25519 `CryptoKeyPair` used to create or encryptKey.
- * @param wrapped The `enc` bytes returned by `create` or `encryptKey`.
- * @param opts `info` — must match the value passed to `create` or `encryptKey`.
- * @returns The recovered AES-GCM `CryptoKey` (extractable).
+ * @param wrapped The `wrapped` bytes returned by `create` or `encryptKey`.
+ * @param opts `info` -- must match the value passed to `create` or
+ *   `encryptKey` -- and `extractable` (default false).
+ * @returns The recovered AES-GCM `CryptoKey`, non-extractable unless
+ *   `opts.extractable` is true.
  */
 async function openBytes (
     keypair:CryptoKeyPair,
     wrapped:Uint8Array,
-    opts?:{ info:Uint8Array|string }
+    opts?:{ info?:Uint8Array|string; extractable?:boolean }
 ):Promise<CryptoKey> {
     const keyBytes = await openRawBytes(keypair, wrapped, opts)
-    return importAesKey(keyBytes)
+    return importAesKey(keyBytes, opts?.extractable ?? false)
 }
 
 /**
@@ -342,13 +382,16 @@ async function openBytes (
  *   `CryptoKeyPair` (its `.publicKey` is used), 32 raw bytes (`Uint8Array`),
  *   or `{ publicKey:string, encoding? }` (encoding defaults to `base64url`).
  * @param aesKey Optional key to wrap, as either an AES-GCM `CryptoKey` or its
- *   raw bytes (`Uint8Array`, 16 or 32 bytes). Omit to generate a fresh
- *   extractable key of `opts.size` bits. A supplied `CryptoKey` MUST be
- *   extractable (its raw bytes are wrapped).
+ *   raw bytes (`Uint8Array`, 16 or 32 bytes). Omit to generate a fresh key
+ *   of `opts.size` bits. A supplied `CryptoKey` MUST be extractable (its
+ *   raw bytes are wrapped) -- that is an input constraint, unrelated to
+ *   `opts.extractable`, which governs the key this returns.
  * @param opts `size` (128/256, default 256; ignored when `aesKey` is
- *   supplied) and `info` (bound into the HPKE key schedule; default empty).
- * @returns { enc:Uint8Array, key:CryptoKey } The wrapped envelope bytes
- *   and a usable AES-GCM `CryptoKey`.
+ *   supplied), `info` (bound into the HPKE key schedule; default empty),
+ *   and `extractable` (whether the RETURNED key can be exported; default
+ *   false).
+ * @returns { wrapped:Uint8Array, key:CryptoKey } The wrapped envelope
+ *   bytes and a usable AES-GCM `CryptoKey`.
  */
 export async function encryptKey (
     recipient:RecipientKey,
@@ -358,8 +401,10 @@ export async function encryptKey (
         size?:128|256
         // HPKE `info`: bound into the key schedule; must match on open.
         info?:Uint8Array|string
+        // Whether the RETURNED AES key can be exported. Default false.
+        extractable?:boolean
     }
-):Promise<{ enc:Uint8Array; key:CryptoKey }> {
+):Promise<{ wrapped:Uint8Array; key:CryptoKey }> {
     const info = normalizeInfo(opts?.info)
 
     let keyBytes:Uint8Array
@@ -382,7 +427,10 @@ export async function encryptKey (
     const { key, baseNonce } = await keySchedule(sharedSecret, info)
     const ciphertext = await aeadSeal(key, baseNonce, keyBytes)
     const wrapped = concat(enc, ciphertext)
-    const aesGcmKey = await importAesKey(keyBytes)
+    const aesGcmKey = await importAesKey(
+        keyBytes,
+        opts?.extractable ?? false
+    )
 
-    return { enc: wrapped, key: aesGcmKey }
+    return { wrapped, key: aesGcmKey }
 }
