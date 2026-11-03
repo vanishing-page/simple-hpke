@@ -137,7 +137,8 @@ export default tseslint.config(
             'lib.es5.d.ts',
             'dist/**',
             'public/**',
-            'test/*.js'
+            'test/*.js',
+            'api-docs/*'
         ]
     },
 

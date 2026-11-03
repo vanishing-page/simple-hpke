@@ -39,3 +39,20 @@ export const HPKE_SUITE_ID = concat(
     i2osp(KDF_ID, 2),
     i2osp(AEAD_ID, 2)
 )
+
+// ----- keyId derivation -----
+//
+// These constants are permanent. Changing any of them changes every
+// `keyId` a consumer has already stored, and there is no migration path,
+// so treat them exactly like the wire format.
+//
+// The label is both the fixed plaintext and the input the fixed nonce is
+// derived from: N = SHA-256(KEY_ID_LABEL)[0..KEY_ID_NONCE_LENGTH].
+export const KEY_ID_LABEL = new TextEncoder()
+    .encode('simple-hpke/keyId/v1')
+
+// AES-GCM's standard nonce size, in bytes. The nonce comes from the label
+// hash rather than a counter or zeros: those are the values a caller
+// doing deterministic nonces would pick, and a collision there would let
+// an attacker solve GHASH for the nonce-independent hash subkey.
+export const KEY_ID_NONCE_LENGTH = 12

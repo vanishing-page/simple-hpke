@@ -1,6 +1,6 @@
 {
   "name": "simple-hpke",
-  "version": "0.2.0",
+  "version": "0.3.1",
   "description": "Hybrid Public Key Encryption",
   "type": "module",
   "files": [
@@ -30,11 +30,11 @@
     "build-cjs:min": "esbuild src/*.ts --bundle --format=cjs --minify --keep-names --tsconfig=tsconfig.build.json --outdir=./dist --out-extension:.js=.min.cjs --sourcemap",
     "build-esm": "esbuild src/*.ts --bundle --format=esm --metafile=dist/meta.json --keep-names --tsconfig=tsconfig.build.json --outdir=./dist --sourcemap && tsc --emitDeclarationOnly --project tsconfig.build.json --outDir dist",
     "build-esm:min": "esbuild ./src/*.ts --format=esm --keep-names --bundle --tsconfig=tsconfig.build.json --minify --out-extension:.js=.min.js --outdir=./dist --sourcemap",
-    "build-docs": "typedoc ./src/index.ts",
+    "build-docs": "typedoc ./src/index.ts --out api-docs",
     "build": "mkdir -p ./dist && rm -rf ./dist/* && npm run build-cjs && npm run build-esm && npm run build-esm:min && npm run build-cjs:min",
     "toc": "markdown-toc --maxdepth 5 -i README.md",
     "preversion": "npm run lint",
-    "version": "npm run toc && auto-changelog -p --template keepachangelog --breaking-pattern 'BREAKING CHANGE:' && git add CHANGELOG.md README.md",
+    "version": "npm run toc && auto-changelog -p --template keepachangelog --breaking-pattern 'BREAKING CHANGE:' --commit-limit false --ignore-commit-pattern '^nightralph' && git add CHANGELOG.md README.md",
     "postversion": "git push --follow-tags && npm publish",
     "prepublishOnly": "npm run build"
   },
@@ -51,6 +51,7 @@
     "eslint": "^10.6.0",
     "markdown-toc": "^1.2.0",
     "newneostandard": "^0.14.1",
+    "nightralph": "^0.1.4",
     "typedoc": "^0.28.20",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.63.0"
@@ -58,7 +59,7 @@
   "main": "dist/index.js",
   "types": "./dist/index.d.ts",
   "directories": {
-    "doc": "docs",
+    "doc": "api-docs",
     "example": "example",
     "test": "test"
   },

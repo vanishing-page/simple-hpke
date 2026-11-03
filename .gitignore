@@ -8,3 +8,5 @@ dist
 public
 CLAUDE.md
 .claude
+.agents
+api-docs
